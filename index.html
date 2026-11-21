@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101418">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="상대전적">
+<title>워챔스 상대전적</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Noto+Sans+KR:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: one phone-width column — status bar, opponent card (stats → head-to-head → recent heroes), manual lookup at the bottom. Single dark look for use next to a game screen. */
+:root {
+  color-scheme: dark;
+  --bg: #101418; --panel: #182027; --panel2: #1f2932; --ink: #e9eef2; --muted: #8d9aa6; --line: #2a3640;
+  --gold: #e4b04a; --win: #4fd18b; --loss: #ff6b5e; --live: #ff4d6d;
+  --hu: #6ea4ff; --oc: #ff7f50; --ne: #b18cff; --ud: #4fd1b0; --rnd: #c8b78f;
+  --display: "Cinzel", Georgia, serif;
+  --body: "Noto Sans KR", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { background: var(--bg); }
+body { margin: 0; color: var(--ink); font: 15px/1.45 var(--body); -webkit-tap-highlight-color: transparent; }
+.wrap { max-width: 560px; margin: 0 auto; padding-block: 12px 40px; padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); display: grid; gap: 12px; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.bar { display: flex; align-items: center; gap: 10px; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 4; background: var(--bg); padding-block: 6px; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.status { white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; font-size: .82rem; color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+.status.s-live .dot { background: var(--live); box-shadow: 0 0 0 0 var(--live); animation: pulse 1.4s infinite; }
+.status.s-live { color: var(--live); font-weight: 700; }
+.status.s-idle .dot { background: var(--win); }
+.status.s-err .dot { background: var(--loss); }
+@keyframes pulse { 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.me { margin-left: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font: 500 .82rem var(--mono); }
+.icon { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; font-size: .78rem; color: var(--muted); }
+.icon.on { color: var(--gold); border-color: var(--gold); }
+
+.label { font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.ctx { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: .82rem; color: var(--muted); }
+.ctx b { color: var(--ink); font-weight: 500; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.card.live { border-color: color-mix(in srgb, var(--live) 55%, var(--line)); }
+.head { padding: 14px 14px 12px; display: grid; gap: 10px; background: linear-gradient(180deg, color-mix(in srgb, var(--c) 22%, transparent), transparent); }
+.who { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.crest { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; font: 900 1.3rem var(--body); color: #0b0f12; background: var(--c); flex: none; }
+.name { font: 700 1.45rem/1.1 var(--display); letter-spacing: .02em; overflow-wrap: anywhere; }
+.tag { font: 500 .8rem var(--mono); color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.stat { background: var(--panel2); border-radius: 10px; padding: 8px 6px; text-align: center; min-width: 0; }
+.stat .v { font: 700 1.15rem/1.2 var(--mono); white-space: nowrap; }
+.stat .k { font-size: .68rem; color: var(--muted); }
+.stat .v.gold { color: var(--gold); font-family: var(--body); font-size: .95rem; padding-top: 2px; }
+
+.sec { border-top: 1px solid var(--line); padding: 12px 14px; display: grid; gap: 8px; }
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.h2h-sum { font: 700 1rem var(--body); }
+.h2h-sum .w { color: var(--win); } .h2h-sum .l { color: var(--loss); }
+.games { display: grid; gap: 6px; }
+.g { display: grid; grid-template-columns: 26px 1fr; gap: 8px; align-items: start; background: var(--panel2); border-radius: 10px; padding: 8px 10px; }
+.res { font: 900 .9rem var(--body); text-align: center; padding-top: 1px; }
+.res.w { color: var(--win); } .res.l { color: var(--loss); }
+.g .meta { font-size: .72rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.line { display: flex; gap: 6px; align-items: baseline; font-size: .86rem; min-width: 0; }
+.line .side { font-size: .68rem; color: var(--muted); width: 26px; flex: none; }
+.heroes { display: flex; flex-wrap: wrap; gap: 3px 8px; min-width: 0; }
+.hero { white-space: nowrap; }
+.hero i { font-style: normal; font: 700 .72rem var(--mono); color: var(--gold); margin-left: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--panel2); border-radius: 999px; padding: 3px 10px; font-size: .8rem; }
+.chip b { color: var(--gold); font-family: var(--mono); margin-left: 4px; }
+.rc { display: inline-block; font-size: .68rem; font-weight: 700; color: #0b0f12; background: var(--c); border-radius: 4px; padding: 0 5px; margin-right: 2px; }
+.empty { color: var(--muted); font-size: .86rem; }
+.slot { display: grid; gap: 10px; }
+.waitbar { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 12px 14px; color: var(--muted); font-size: .86rem; }
+.waitbar .dot { background: var(--win); }
+.hist { display: grid; gap: 6px; }
+.hrow { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; align-items: start; text-align: left; width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.hrow:active { background: var(--panel2); }
+.hmain { display: grid; gap: 3px; min-width: 0; }
+.hopp { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hopp b { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hopp .mmr { font: 500 .78rem var(--mono); color: var(--muted); }
+.hheroes { display: flex; flex-wrap: wrap; gap: 2px 6px; font-size: .78rem; align-items: baseline; }
+.hheroes .vs { color: var(--muted); font-size: .7rem; }
+.hmeta { font-size: .72rem; color: var(--muted); }
+.gain { font: 700 .86rem var(--mono); padding-top: 1px; }
+.gain.w { color: var(--win); } .gain.l { color: var(--loss); }
+.ghost { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; color: var(--ink); }
+.back { justify-self: start; background: none; border: 0; color: var(--gold); font-weight: 700; padding: 4px 0; }
+.units { font-size: .8rem; color: var(--ink); display: flex; gap: 6px; align-items: baseline; }
+.units:empty { display: none; }
+.units .side { font-size: .68rem; color: var(--muted); width: 26px; flex: none; }
+.units .u { white-space: nowrap; }
+.units .u i { font-style: normal; font: 700 .72rem var(--mono); color: var(--gold); margin-left: 2px; }
+.units .wait { color: var(--muted); }
+.usum { display: grid; gap: 6px; }
+.usum:empty { display: none; }
+.ana { display: grid; gap: 4px; }
+.units .t { font: 500 .7rem var(--mono); color: var(--muted); }
+.units .u.unit, .flow .u.unit { color: var(--gold); }
+.tagx { background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: .74rem; color: var(--ink); }
+.warn { color: var(--live); }
+.tagx.warn { border-color: color-mix(in srgb, var(--live) 60%, var(--line)); }
+details.more { font-size: .78rem; }
+details.more summary { cursor: pointer; color: var(--muted); padding: 4px 0; list-style: none; }
+details.more summary::before { content: "▸ "; }
+details.more[open] summary::before { content: "▾ "; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more dl { margin: 4px 0 0; display: grid; gap: 6px; }
+details.more dt { font-size: .66rem; color: var(--muted); letter-spacing: .06em; }
+details.more dd { margin: 0; line-height: 1.6; }
+details.more dd b { font-weight: 700; }
+.flow { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.flow .u { white-space: nowrap; }
+.flow .t { font: 500 .7rem var(--mono); color: var(--muted); }
+.loading { color: var(--muted); font-size: .86rem; padding: 18px 14px; }
+
+.idle { text-align: center; padding: 22px 14px; color: var(--muted); display: grid; gap: 6px; }
+.idle strong { color: var(--ink); font-size: 1.05rem; }
+
+form.find { display: flex; gap: 8px; }
+form.find input { flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+form.find button, .btn { background: var(--gold); color: #1a1205; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; }
+.foot { text-align: center; font-size: .74rem; color: var(--muted); }
+.foot a { color: inherit; }
+
+dialog { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 18px; width: min(92vw, 380px); }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+dialog form { display: grid; gap: 10px; }
+dialog input { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+@media (prefers-reduced-motion: reduce) { .status.s-live .dot { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <span class="status" id="status"><span class="dot"></span><span id="statusText">연결 중…</span></span>
+    <button class="icon" id="wake" type="button" title="화면 꺼짐 방지">화면 유지</button>
+    <button class="me" id="meBtn" type="button"></button>
+  </div>
+
+  <div id="live" class="slot"><div class="waitbar"><span class="dot"></span><span>연결 중…</span></div></div>
+
+  <div id="detail" class="slot" hidden></div>
+
+  <section id="history" class="slot">
+    <div class="sec-h"><span class="label" id="histTitle">내 경기 기록</span></div>
+    <div id="hist" class="hist"><div class="loading">경기 기록을 불러오는 중…</div></div>
+    <button type="button" class="ghost" id="histMore" hidden>더 보기</button>
+  </section>
+
+  <form class="find" id="find" autocomplete="off">
+    <input id="findInput" placeholder="상대 배틀태그 직접 조회 (예: Lukas#21464)" aria-label="상대 배틀태그">
+    <button type="submit">조회</button>
+  </form>
+  <div class="foot">게임에 들어가면 5초 안에 맨 위에 상대 전적이 뜹니다 · <a href="search.html">전체 검색</a> · 데이터 w3champions.com</div>
+</div>
+
+<dialog id="meDlg">
+  <form method="dialog" id="meForm">
+    <div class="label">내 배틀태그</div>
+    <input id="meInput" placeholder="winslin#3872" aria-label="내 배틀태그">
+    <button class="btn" type="submit">저장</button>
+  </form>
+</dialog>
+
+<script>
+const API = "https://website-backend.w3champions.com/api";
+const GW = 20;
+const POLL_MS = 5000;
+const RACES = { 0: ["랜덤", "--rnd", "R"], 1: ["휴먼", "--hu", "H"], 2: ["오크", "--oc", "O"], 4: ["나엘", "--ne", "N"], 8: ["언데드", "--ud", "U"], 16: ["랜덤", "--rnd", "R"] };
+const LEAGUES = ["그마", "마스터", "어뎁트", "다이아", "플래", "골드", "실버", "브론즈", "그래스"];
+const HEROES = {
+  archmage: "아크메이지", mountainking: "마운틴킹", paladin: "팔라딘", bloodmage: "블러드메이지",
+  blademaster: "블마", farseer: "파시어", taurenchieftain: "타우렌", shadowhunter: "쉐헌",
+  demonhunter: "데헌", keeperofthegrove: "키퍼", priestessofthemoon: "포문", warden: "워든",
+  deathknight: "데나", lich: "리치", dreadlord: "드레드로드", cryptlord: "크립트로드",
+  seawitch: "나가", pandarenbrewmaster: "판다", beastmaster: "비마", pitlord: "핏로드",
+  tinker: "팅커", sorceror: "소서러", forsakenpaladin: "포세이큰 팔라딘", bansheeranger: "밴시 레인저", avatarofflame: "파이어로드", alchemist: "알케", darkranger: "다크레인저",
+};
+const WORKERS = new Set(["hpea", "opeo", "ewsp", "uaco", "hmil"]);
+const UNITS = {
+  hfoo: "풋맨", hrif: "라이플", hkni: "나이트", hmpr: "프리스트", hsor: "소서리스", hspt: "스펠브", hmtm: "모탈팀",
+  hgry: "그리폰", hgyr: "자이로", hmtt: "시즈엔진", hrtt: "시즈엔진", hdhw: "드래곤호크",
+  ogru: "그런트", ohun: "헤드헌터", otbk: "버서커", ocat: "데몰리셔", oshm: "샤먼", odoc: "위치닥터",
+  ospw: "스피릿워커", ospm: "스피릿워커", orai: "울프", okod: "코도", otbr: "배트", owyv: "와이번", otau: "타우렌",
+  earc: "아처", esen: "헌트리스", ebal: "발리스타", edry: "드라이어드", edoc: "곰드루", edcm: "곰드루",
+  emtg: "자이언트", ehip: "히포", ehpr: "히포라이더", edot: "새드루", edtm: "새드루", efdr: "페어리", echm: "키메라",
+  ugho: "구울", ucry: "핀드", ugar: "가고일", ugrm: "가고일", uabo: "어보미", umtw: "미트웨건", unec: "네크로",
+  uban: "밴시", uobs: "옵시디언", ubsp: "디스트로이어", ufro: "프웜", ushd: "쉐이드",
+  nftb: "트롤버서커", nfsp: "트롤프리스트", nogm: "오우거", ngir: "슈레더", nzep: "비행선", ngsp: "고블린공병",
+  nkob: "코볼트", nmrr: "머로더", nsat: "사티로스", nmfs: "머로크", nftr: "트롤", nhrw: "하피",
+};
+const unitList = (u, max = 8) => Object.entries(u || {}).filter(([k]) => !WORKERS.has(k)).sort((a, b) => b[1] - a[1]).slice(0, max)
+  .map(([k, n]) => `<span class="u">${esc(UNITS[k] || k)}<i>${n}</i></span>`).join("") || `<span class="wait">전투 유닛 없음</span>`;
+let MODES = { 1: "1v1", 2: "2v2", 4: "4v4", 5: "FFA", 6: "2v2 AT" };
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const race = (r) => RACES[r] || ["?", "--rnd", "?"];
+const rc = (r) => `<span class="rc" style="--c:var(${race(r)[1]})">${race(r)[0]}</span>`;
+const pct = (x) => Math.round(x * 100) + "%";
+const heroName = (h) => HEROES[h.name] || h.name;
+const heroList = (pl) => (pl?.heroes || []).map((h) => `<span class="hero">${esc(heroName(h))}<i>${h.level}</i></span>`).join("") || `<span class="empty">-</span>`;
+const day = (iso) => { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()}`; };
+const dur = (s) => `${Math.floor(s / 60)}분`;
+const lower = (s) => String(s || "").toLowerCase();
+
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { return null; } }
+
+const state = { me: store("w3c_me") || "winslin#3872", liveId: null, idleShown: false, seasons: null, current: null, mySeasons: [] };
+
+async function get(path) {
+  const res = await fetch(API + path, { cache: "no-store" });
+  if (res.status === 404 || res.status === 204) return null;
+  if (!res.ok) throw new Error("서버 응답 " + res.status);
+  const t = await res.text();
+  return t ? JSON.parse(t) : null;
+}
+
+function setStatus(kind, text) {
+  const s = $("#status"); s.className = "status s-" + kind; $("#statusText").textContent = text;
+}
+
+/* ---------- opponent card ---------- */
+function findMe(match) {
+  for (const t of match.teams) for (const p of t.players) if (lower(p.battleTag) === lower(state.me)) return { team: t, pl: p };
+  return null;
+}
+
+async function seasonsOf(tag) {
+  const p = await get(`/players/${encodeURIComponent(tag)}`);
+  return { profile: p, seasons: (p?.participatedInSeasons || []).map((s) => s.id).sort((a, b) => b - a) };
+}
+
+async function headToHead(opp, oppSeasons) {
+  const shared = state.mySeasons.filter((s) => oppSeasons.includes(s));
+  const lists = await Promise.all(shared.map((s) =>
+    get(`/matches/search?playerId=${encodeURIComponent(state.me)}&opponentId=${encodeURIComponent(opp)}&gateway=${GW}&offset=0&pageSize=100&season=${s}`).catch(() => null)));
+  return lists.flatMap((d) => d?.matches || []).sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+}
+
+function gameRow(m, focusTag, labels, withUnits) {
+  let a, b;
+  for (const t of m.teams) for (const p of t.players) { if (lower(p.battleTag) === lower(focusTag)) a = { p, t }; }
+  if (!a) return "";
+  const others = m.teams.filter((t) => t !== a.t).flatMap((t) => t.players);
+  b = others[0];
+  const won = a.p.won;
+  return `<div class="g">
+    <div class="res ${won ? "w" : "l"}">${won ? "승" : "패"}</div>
+    <div style="min-width:0;display:grid;gap:3px">
+      <div class="line"><span class="side">${labels[0]}</span>${rc(a.p.race)}<span class="heroes">${heroList(a.p)}</span></div>
+      <div class="line"><span class="side">${labels[1]}</span>${rc(b?.race)}<span class="heroes">${heroList(b)}</span></div>
+      ${withUnits ? `<div class="ana" data-mid="${esc(m.id)}"><div class="units"><span class="side">유닛</span><span class="wait">분석 대기</span></div></div>` : ""}
+      <div class="meta"><span>${day(m.startTime)}</span><span>${esc(m.mapName || m.map)}</span><span>${dur(m.durationInSeconds)}</span>${MODES[m.gameMode] && m.gameMode !== 1 ? `<span>${esc(MODES[m.gameMode])}</span>` : ""}${labels[1] !== "상대" ? `<span>${esc(b?.name || "")} ${b?.oldMmr ?? ""}</span>` : `<span>MMR ${a.p.oldMmr ?? "-"}</span>`}</div>
+    </div>
+  </div>`;
+}
+
+async function renderOpponent(el, opp, info) {
+  // info: { race, mmr, gameMode, ranking, live }
+  const tag = opp.battleTag;
+  const myRace = info.myRace ?? state.myRace ?? 4;
+  const [r0, rVar, rLetter] = race(info.race);
+  el.style.setProperty("--c", `var(${rVar})`);
+  el.innerHTML = `<div class="head"><div class="who"><div class="crest">${rLetter}</div><div style="min-width:0"><div class="name">${esc(opp.name || tag.split("#")[0])}</div><div class="tag">${esc(tag)}</div></div></div><div class="loading" style="padding:0">상대 정보를 불러오는 중…</div></div>`;
+
+  try {
+    const { profile, seasons } = await seasonsOf(tag);
+    const season = seasons[0] ?? state.current;
+    const [modes, settings, h2h, recent] = await Promise.all([
+      season != null ? get(`/players/${encodeURIComponent(tag)}/game-mode-stats?gateWay=${GW}&season=${season}`).catch(() => []) : [],
+      get(`/personal-settings/${encodeURIComponent(tag)}`).catch(() => null),
+      headToHead(tag, seasons),
+      season != null ? get(`/matches/search?playerId=${encodeURIComponent(tag)}&gateway=${GW}&offset=0&pageSize=15&season=${season}`).catch(() => null) : null,
+    ]);
+    const gm = info.gameMode || 1;
+    const ms = (modes || []).filter((m) => m.gameMode === gm);
+    const st = ms.find((m) => m.race === info.race) || ms.sort((a, b) => b.games - a.games)[0];
+    const mmr = info.mmr ?? st?.mmr;
+    const lg = st && st.rank > 0 ? `${LEAGUES[st.leagueOrder] ?? "리그"}${st.division ? " " + st.division : ""}` : "배치 전";
+    const total = (profile?.winLosses || []).filter((w) => w.games).sort((a, b) => b.games - a.games);
+    const loc = settings?.country || settings?.location;
+
+    const wins = h2h.filter((m) => findMe(m)?.pl.won).length;
+    const h2hHtml = h2h.length
+      ? `<div class="games">${h2h.slice(0, 10).map((m, i) => gameRow(m, state.me, ["나", "상대"], i < UNIT_GAMES)).join("")}</div>${h2h.length > 10 ? `<div class="empty">최근 10경기만 표시 (전체 ${h2h.length}경기)</div>` : ""}`
+      : `<div class="empty">아직 이 상대와 붙은 기록이 없습니다.</div>`;
+
+    const rec = (recent?.matches || []).filter((m) => m.gameMode === gm);
+    const firstHeroes = {};
+    for (const m of rec) {
+      for (const t of m.teams) for (const p of t.players) if (lower(p.battleTag) === lower(tag) && p.heroes?.[0]) {
+        const n = heroName(p.heroes[0]); firstHeroes[n] = (firstHeroes[n] || 0) + 1;
+      }
+    }
+    const fh = Object.entries(firstHeroes).sort((a, b) => b[1] - a[1]);
+    let streak = 0, sw = null;
+    for (const m of rec) {
+      const me = m.teams.flatMap((t) => t.players).find((p) => lower(p.battleTag) === lower(tag));
+      if (!me) continue;
+      if (sw === null) sw = me.won;
+      if (me.won !== sw) break;
+      streak++;
+    }
+
+    el.innerHTML = `
+      <div class="head">
+        <div class="who">
+          <div class="crest">${rLetter}</div>
+          <div style="min-width:0">
+            <div class="name">${esc(profile?.name || opp.name || tag)}</div>
+            <div class="tag">${esc(tag)}${loc ? " · " + esc(loc) : ""}</div>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="v">${mmr ?? "-"}</div><div class="k">MMR</div></div>
+          <div class="stat"><div class="v gold">${lg}</div><div class="k">${st?.rank > 0 ? "#" + st.rank : "리그"}</div></div>
+          <div class="stat"><div class="v">${st ? pct(st.winrate) : "-"}</div><div class="k">${st ? `${st.wins}승 ${st.losses}패` : "시즌 승률"}</div></div>
+          <div class="stat"><div class="v">${st ? Math.max(1, Math.round((1 - st.quantile) * 100)) + "%" : "-"}</div><div class="k">상위</div></div>
+        </div>
+        <div class="ctx"><span>${info.live === false ? "그 판" : "이번 판"} ${rc(info.race)} · 통산 ${total.map((w) => `${race(w.race)[0]} ${w.wins}-${w.losses}`).join(" · ") || "-"}</span>${streak >= 2 ? `<b>${streak}${sw ? "연승" : "연패"} 중</b>` : ""}</div>
+      </div>
+      <div class="sec">
+        <div class="sec-h"><span class="label">나와의 전적</span><span class="h2h-sum">${h2h.length ? `${h2h.length}전 <span class="w">${wins}승</span> <span class="l">${h2h.length - wins}패</span>` : "첫 대결"}</span></div>
+        <div class="usum"></div>
+        ${h2hHtml}
+      </div>
+      <div class="sec vsr"><div class="sec-h"><span class="label">상대 vs ${race(myRace)[0]} 최근 ${VSR_GAMES}경기</span></div><div class="empty">경기 찾는 중…</div></div>
+      <div class="sec">
+        <div class="sec-h"><span class="label">상대 최근 ${rec.length}경기 첫 영웅</span></div>
+        ${fh.length ? `<div class="chips">${fh.map(([n, c]) => `<span class="chip">${esc(n)}<b>${c}</b></span>`).join("")}</div>` : `<div class="empty">이번 시즌 기록이 없습니다.</div>`}
+        ${rec.length ? `<div class="games">${rec.slice(0, 5).map((m) => gameRow(m, tag, ["상대", "vs"])).join("")}</div>` : ""}
+      </div>`;
+    const h2hSec = el.querySelector(".sec");
+    (async () => {
+      if (h2h.length) await analyzeUnits(el, h2hSec, tag, h2h.slice(0, UNIT_GAMES), { other: "나", vsMe: true });
+      if (!el.isConnected) return;
+      const vs = el.querySelector(".vsr");
+      const games = await vsRaceGames(tag, myRace, seasons, new Set(h2h.map((m) => m.id))).catch(() => []);
+      if (!el.isConnected) return;
+      const w = games.filter((m) => m.teams.flatMap((t) => t.players).find((p) => lower(p.battleTag) === lower(tag))?.won).length;
+      vs.innerHTML = `<div class="sec-h"><span class="label">상대 vs ${race(myRace)[0]} 최근 ${games.length}경기</span>${games.length ? `<span class="h2h-sum"><span class="w">${w}승</span> <span class="l">${games.length - w}패</span></span>` : ""}</div>`
+        + (games.length ? `<div class="usum"></div><div class="games">${games.map((m) => gameRow(m, tag, ["상대", "vs"], true)).join("")}</div>`
+          : `<div class="empty">최근 두 시즌에 ${race(myRace)[0]} 상대 1v1 기록이 없습니다.</div>`);
+      if (games.length) await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false });
+    })();
+  } catch (e) {
+    el.insertAdjacentHTML("beforeend", `<div class="sec empty">상대 정보를 불러오지 못했습니다 (${esc(e.message)}).</div>`);
+  }
+}
+
+/* opponent's latest 1v1 games against my race, excluding our own games */
+const VSR_GAMES = 3;
+async function vsRaceGames(tag, myRace, seasons, exclude) {
+  const out = [];
+  for (const s of seasons.slice(0, 2)) {
+    for (let offset = 0; offset < 200 && out.length < VSR_GAMES; offset += 100) {
+      const d = await get(`/matches/search?playerId=${encodeURIComponent(tag)}&gateway=${GW}&offset=${offset}&pageSize=100&season=${s}`);
+      const ms = d?.matches || [];
+      for (const m of ms) {
+        if (m.gameMode !== 1 || exclude.has(m.id)) continue;
+        const other = m.teams.flatMap((t) => t.players).find((p) => lower(p.battleTag) !== lower(tag));
+        if (other && other.race === myRace) out.push(m);
+        if (out.length >= VSR_GAMES) break;
+      }
+      if (ms.length < 100) break;
+    }
+    if (out.length >= VSR_GAMES) break;
+  }
+  return out;
+}
+
+/* ---------- replay analysis ---------- */
+const UNIT_GAMES = 5;
+const BUILD_WINDOW = 6 * 60000;
+const BUILDINGS = {
+  htow: "타운홀", hkee: "킵", hcas: "캐슬", hhou: "농장", halt: "제단", hbar: "배럭", hbla: "대장간", hlum: "제재소",
+  hwtw: "정찰탑", hgtw: "가드타워", hctw: "캐논타워", hatw: "아케인타워", harm: "워크샵", hars: "생텀", hgra: "그리폰둥지", hvlt: "상점",
+  ogre: "그레이트홀", ostr: "스트롱홀드", ofrt: "포트리스", otrb: "버로우", oalt: "제단", obar: "배럭", ofor: "워밀", owtw: "감시탑",
+  obea: "비스티어리", osld: "스피릿롯지", otto: "토템", ovln: "상점",
+  etol: "생명의나무", etoa: "세월의나무", etoe: "영원의나무", emow: "문웰", eate: "제단", eaom: "전쟁의고대정령", edob: "사냥꾼회관",
+  etrp: "수호고대정령", eaoe: "지식의고대정령", eaow: "바람의고대정령", edos: "키메라둥지", eden: "상점",
+  unpl: "네크로폴리스", unp1: "망자의전당", unp2: "검은성채", uzig: "지구라트", uzg1: "영혼탑", uzg2: "네루비안탑", uaod: "제단",
+  usep: "토굴", ugrv: "묘지", utod: "저주받은사원", uslh: "도살장", ubon: "뼈무덤", utom: "상점", usap: "희생의구덩이",
+};
+const TIER2 = new Set(["hkee", "ostr", "etoa", "unp1"]);
+const TIER3 = new Set(["hcas", "ofrt", "etoe", "unp2"]);
+const HALLS = new Set(["htow", "ogre", "etol", "unpl"]);
+const TOWERS = new Set(["hwtw", "owtw", "etrp", "uzg1", "uzg2"]);
+const ITEMS = {
+  bspd: "신속의장화", dust: "더스트", stel: "텔포지팡이", plcl: "하급마나포션", sreg: "재생스크롤", tsct: "상아탑", tret: "리트레이닝",
+  pnvl: "하급무적포션", pinv: "투명포션", spro: "보호스크롤", shea: "회복스크롤", phea: "체력포션", pman: "마나포션", hslv: "힐링연고",
+  stwp: "귀환스크롤", sneg: "부정지팡이", ssan: "성역지팡이", wneg: "부정완드", ofro: "서리오브", rnec: "강령술지팡이", pghe: "상급체력포션",
+  pgma: "상급마나포션", shas: "신속스크롤", skul: "희생해골", tcas: "작은성", mcri: "기계생물", cnob: "귀족의서클릿", ward: "와드",
+  sres: "복구스크롤", rej1: "하급회복물약", pclr: "명료포션", wild: "야생의부적", spsh: "주문방패", ankh: "부활의앵크",
+};
+const UPGRADES = {
+  Rhme: "근접공격", Rhra: "원거리공격", Rhar: "판금갑옷", Rhla: "가죽갑옷", Rhac: "석공술", Rhde: "디펜드", Rhri: "롱라이플",
+  Rhst: "소서리스훈련", Rhpt: "프리스트훈련", Rhan: "동물전투훈련", Rhfl: "플레어", Rhfs: "파편탄", Rhrt: "탄막", Rhcd: "구름",
+  Rhss: "제어마법", Rhhb: "폭풍망치", Rhlh: "벌목", Rhse: "마법감시", Rhpm: "배낭", Rhgb: "대공포",
+  Rome: "근접공격", Rora: "원거리공격", Roar: "갑옷", Rwdm: "전쟁북", Ropg: "약탈", Robs: "버서커강화", Rosp: "가시방벽",
+  Rotr: "트롤재생", Rost: "샤먼훈련", Rowd: "위치닥터훈련", Rowt: "스피릿워커훈련", Roen: "덫", Rovs: "독창", Rolf: "액체불",
+  Ropm: "배낭", Rorb: "방어강화", Robk: "버서커업", Robf: "화염폭탄",
+  Resm: "달의힘", Rema: "달의갑옷", Resw: "야생의힘", Rerh: "강화가죽", Reuv: "울트라비전", Renb: "자연의축복", Reib: "강화활",
+  Remk: "명사수", Resc: "센티넬", Remg: "문글레이브", Redt: "새드루훈련", Redc: "곰드루훈련", Resi: "마법해제", Reht: "히포조련",
+  Recb: "부식브레스", Repb: "보팔블레이드", Rews: "샘물", Rehs: "단단한피부", Rers: "저항피부", Repm: "배낭", Reeb: "곰변신", Reec: "새변신",
+  Rume: "부정의힘", Rura: "생물공격", Ruar: "부정의갑옷", Rucr: "생물갑각", Rupc: "질병구름", Rusf: "디스트로이어", Rune: "네크로훈련",
+  Ruba: "밴시훈련", Rufb: "냉기브레스", Rusm: "해골숙련", Rubu: "잠복", Ruwb: "거미줄", Rusl: "석화", Rugf: "구울광란", Ruex: "시체발굴",
+  Rupm: "배낭", Rusp: "가고일석화",
+};
+const HERO_CODES = {
+  Hamg: "아크메이지", Hmkg: "마운틴킹", Hpal: "팔라딘", Hblm: "블러드메이지", Obla: "블마", Ofar: "파시어", Otch: "타우렌", Oshd: "쉐헌",
+  Edem: "데헌", Ekee: "키퍼", Emoo: "포문", Ewar: "워든", Udea: "데나", Ulic: "리치", Udre: "드레드로드", Ucrl: "크립트로드",
+  Nngs: "나가", Npbm: "판다", Nbst: "비마", Nplh: "핏로드", Ntin: "팅커", Nfir: "파이어로드", Nalc: "알케", Nbrn: "다크레인저",
+};
+const SKILLS = {
+  AHbz: "블리자드", AHwe: "워엘", AHab: "브릴", AHmt: "매스텔", AHtb: "스톰볼트", AHtc: "썬클", AHbh: "배쉬", AHav: "아바타",
+  AHhb: "홀리라이트", AHds: "디바인", AHad: "디보션", AHre: "리저렉션", AHfs: "플레임", AHbn: "배니쉬", AHdr: "사이펀", AHpx: "피닉스",
+  AOwk: "윈드워크", AOmi: "미러", AOcr: "크리", AOww: "블레이드스톰", AOcl: "체라", AOfs: "파사이트", AOsf: "늑대", AOeq: "어스퀘이크",
+  AOsh: "쇼크웨이브", AOws: "워스톰프", AOae: "인듀런스", AOre: "리인카네이션", AOhw: "힐웨", AOhx: "헥스", AOsw: "와드", AOvd: "부두",
+  AEmb: "마나번", AEim: "이몰", AEev: "회피", AEme: "메타", AEer: "인탱글", AEfn: "포오네", AEah: "가시오라", AEtq: "트랭퀼",
+  AHfa: "불화살", AEst: "부엉이", AEar: "트루샷", AEsf: "스타폴", AEbl: "블링크", AEfk: "팬오나", AEsh: "섀도스트라이크", AEsv: "벤전스",
+  AUdc: "데스코일", AUdp: "데스팩트", AUau: "언홀리", AUan: "애니메이트", AUfn: "노바", AUfu: "프로스트아머", AUdr: "다크리추얼", AUdd: "디앤디",
+  AUav: "뱀피릭", AUsl: "슬립", AUcs: "캐리언", AUin: "인페르노", AUim: "임페일", AUts: "가시갑각", AUcb: "딱정벌레", AUls: "로커스트",
+  ANfl: "포크라이트닝", ANfa: "서리화살", ANms: "마나실드", ANto: "토네이도", ANbf: "불숨", ANdh: "드렁큰헤이즈", ANdb: "드렁큰브롤러", ANef: "분신",
+  ANsg: "곰", ANsq: "고슴도치", ANsw: "매", ANst: "스탬피드", ANrf: "불비", ANht: "공포의울음", ANca: "클리브", ANdo: "둠",
+  ANsy: "포켓팩토리", ANcs: "클러스터로켓", ANeg: "엔지니어링", ANrg: "로보고블린", ANso: "소울번", ANlm: "용암정령", ANic: "인시너레이트", ANvc: "볼케이노",
+  ANhs: "힐링스프레이", ANcr: "케미컬레이지", ANab: "산성폭탄", ANtm: "변환", ANsi: "사일런스", ANba: "블랙애로우", ANdr: "라이프드레인", ANch: "매혹",
+};
+const nm = (dict, k) => esc(dict[k] || k);
+const mmss = (ms) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+// the same command is often sent twice in a row; keep one per id within 2s
+// buildings people build several of at once keep the short window; one-off buildings use 10s
+const MULTI = new Set(["hhou", "otrb", "emow", "uzig", "hwtw", "owtw", "etrp", "uzg1", "uzg2"]);
+function dedupe(list, single = false) {
+  const last = {}; const out = [];
+  for (const [id, ms] of list || []) {
+    const win = single && !MULTI.has(id) ? 10000 : 2000;
+    if (last[id] != null && ms - last[id] < win) continue;
+    last[id] = ms; out.push([id, ms]);
+  }
+  return out;
+}
+const firstAt = (list, set) => { const hit = (list || []).find(([id]) => set.has(id)); return hit ? hit[1] : null; };
+
+let parserPromise = null;
+function loadParser() {
+  if (!parserPromise) parserPromise = new Promise((ok, fail) => {
+    const s = document.createElement("script"); s.src = "w3g.js";
+    s.onload = () => (window.W3G ? ok(window.W3G) : fail(new Error("parser missing")));
+    s.onerror = () => { parserPromise = null; fail(new Error("w3g.js를 불러오지 못했습니다")); };
+    document.head.appendChild(s);
+  });
+  return parserPromise;
+}
+
+// Condense one player's replay data into what the card shows; this is what gets cached.
+function digest(p) {
+  const builds = dedupe(p.buildings, true);
+  const seen = new Set(); const firstUnits = [];
+  for (const [id, ms] of p.unitOrder || []) if (!WORKERS.has(id) && !seen.has(id)) { seen.add(id); firstUnits.push([id, ms]); }
+  return {
+    apm: p.apm, units: p.units,
+    tier2: firstAt(builds, TIER2), tier3: firstAt(builds, TIER3), expo: firstAt(builds, HALLS),
+    towers5: builds.filter(([id, ms]) => TOWERS.has(id) && ms < 5 * 60000).length,
+    build: [...builds.map(([id, ms]) => ["b", id, ms]), ...firstUnits.map(([id, ms]) => ["u", id, ms])].filter((x) => x[2] <= BUILD_WINDOW).sort((a, b) => a[2] - b[2]),
+    items: dedupe(p.items).slice(0, 14),
+    upgrades: dedupe(p.upgrades),
+    heroes: (p.heroes || []).map((h) => ({ id: h.id, level: h.level, retrain: h.retrain, skills: h.skills.map((s) => s[0]).slice(0, 10) })),
+  };
+}
+
+async function analysisOf(matchId) {
+  const key = "w3c_a2_" + matchId;
+  const hit = store(key); if (hit) try { return JSON.parse(hit); } catch {}
+  const W3G = await loadParser();
+  const res = await fetch(`${API}/replays/${encodeURIComponent(matchId)}`);
+  if (!res.ok) throw new Error("리플레이 없음");
+  const r = await W3G.parseReplay(await res.arrayBuffer());
+  const out = {};
+  for (const p of r.players) out[lower(p.name)] = digest(p);
+  store(key, JSON.stringify(out));
+  return out;
+}
+
+const skillLine = (h) => `<b>${nm(HERO_CODES, h.id)}</b> ${h.skills.map((s) => nm(SKILLS, s)).join(" → ") || "-"}${h.retrain ? " <span class=\"wait\">(리트레이닝)</span>" : ""}`;
+const timeline = (list, dict) => list.map(([id, ms]) => `<span class="u"><span class="t">${mmss(ms)}</span> ${nm(dict, id)}</span>`).join("") || `<span class="wait">없음</span>`;
+
+function detailHtml(o, me, other = "나") {
+  const build = o.build.map(([k, id, ms]) => `<span class="u ${k === "u" ? "unit" : ""}"><span class="t">${mmss(ms)}</span> ${k === "u" ? nm(UNITS, id) : nm(BUILDINGS, id)}</span>`).join("") || `<span class="wait">없음</span>`;
+  return `<details class="more"><summary>빌드 · 스킬 · 아이템 자세히</summary>
+    <dl>
+      <dt>빌드 (6분까지)</dt><dd class="flow">${build}</dd>
+      <dt>영웅 스킬 순서</dt><dd>${o.heroes.map((h) => `<div>${skillLine(h)}</div>`).join("") || "-"}</dd>
+      <dt>아이템</dt><dd class="flow">${timeline(o.items, ITEMS)}</dd>
+      <dt>업그레이드</dt><dd class="flow">${timeline(o.upgrades, UPGRADES)}</dd>
+      <dt>티어 · 멀티</dt><dd>2티어 ${o.tier2 != null ? mmss(o.tier2) : "-"} · 3티어 ${o.tier3 != null ? mmss(o.tier3) : "-"} · 멀티 ${o.expo != null ? mmss(o.expo) : "안 함"}${o.towers5 >= 2 ? ` · <b class="warn">5분 전 타워 ${o.towers5}개</b>` : ""}</dd>
+      <dt>APM</dt><dd>상대 ${o.apm}${me ? ` · ${other} ${me.apm}` : ""}</dd>
+    </dl></details>`;
+}
+
+function summaryHtml(list, total, games, opt = { other: "나", vsMe: true }) {
+  // list: [{o, me}] for analysed games, newest first
+  const n = list.length;
+  const t2 = list.map((x) => x.o.tier2).filter((v) => v != null);
+  const t3 = list.map((x) => x.o.tier3).filter((v) => v != null);
+  const ex = list.map((x) => x.o.expo).filter((v) => v != null);
+  const towerGames = list.filter((x) => x.o.towers5 >= 2).length;
+  const itemCount = {};
+  for (const { o } of list) for (const id of new Set(o.items.filter(([, ms]) => ms < BUILD_WINDOW).map(([id]) => id))) itemCount[id] = (itemCount[id] || 0) + 1;
+  const items = Object.entries(itemCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const myApm = list.map((x) => x.me?.apm).filter(Boolean);
+  const h = list[0].o.heroes[0];
+  const tags = [];
+  if (towerGames) tags.push(`<span class="tagx warn">초반 타워 ${towerGames}/${n}경기</span>`);
+  if (ex.length) tags.push(`<span class="tagx">멀티 ${ex.length}/${n}경기 · 평균 ${mmss(avg(ex))}</span>`);
+  else tags.push(`<span class="tagx">멀티 안 함 (${n}경기)</span>`);
+  if (t2.length) tags.push(`<span class="tagx">2티어 평균 ${mmss(avg(t2))}</span>`);
+  if (t3.length) tags.push(`<span class="tagx">3티어 ${t3.length}/${n}경기 · ${mmss(avg(t3))}</span>`);
+  tags.push(`<span class="tagx">APM 상대 ${Math.round(avg(list.map((x) => x.o.apm)))}${myApm.length ? ` / ${opt.other} ${Math.round(avg(myApm))}` : ""}</span>`);
+  return `
+    <div class="units"><span class="side">주력</span><span class="heroes">${unitList(total, 6)}</span></div>
+    <div class="chips">${tags.join("")}</div>
+    ${h ? `<div class="units"><span class="side">스킬</span><span>${skillLine({ ...h, skills: h.skills.slice(0, 5) })}</span></div>` : ""}
+    ${items.length ? `<div class="units"><span class="side">템</span><span class="heroes">${items.map(([id, c]) => `<span class="u">${nm(ITEMS, id)}<i>${c}</i></span>`).join("")}</span></div>` : ""}
+    <div class="empty" style="font-size:.72rem">${opt.vsMe ? "나와 한" : "다른 유저와 한"} 최근 ${n}경기 리플레이 기준${n < games ? ` · 분석 중 ${n}/${games}` : ""} · 스킬은 직전 경기 첫 영웅, 템은 6분 전 구매 횟수</div>`;
+}
+
+async function analyzeUnits(el, sec, tag, games, opt) {
+  const total = {}; const list = [];
+  const sum = sec.querySelector(".usum");
+  if (sum) sum.innerHTML = `<div class="units"><span class="side">분석</span><span class="wait">리플레이 분석 중 0/${games.length}</span></div>`;
+  for (const m of games) {
+    if (!el.isConnected) return;
+    const box = sec.querySelector(`.ana[data-mid="${CSS.escape(m.id)}"]`);
+    if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">분석 중…</span></div>`;
+    try {
+      const a = await analysisOf(m.id);
+      const otherTag = opt.vsMe ? state.me : m.teams.flatMap((t) => t.players).find((p) => lower(p.battleTag) !== lower(tag))?.battleTag;
+      const o = a[lower(tag)], me = a[lower(otherTag)];
+      if (!o) throw new Error("리플레이에서 상대를 찾지 못함");
+      if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="heroes">${unitList(o.units)}</span></div>${detailHtml(o, me, opt.other)}`;
+      for (const [k, n] of Object.entries(o.units || {})) if (!WORKERS.has(k)) total[k] = (total[k] || 0) + n;
+      list.push({ o, me });
+      if (sum) sum.innerHTML = summaryHtml(list, total, games.length, opt);
+    } catch (e) {
+      if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">${esc(e.message)}</span></div>`;
+    }
+  }
+  if (!list.length && sum) sum.innerHTML = `<div class="empty">리플레이를 분석하지 못했습니다.</div>`;
+}
+
+/* ---------- match rendering ---------- */
+function matchCtx(match, label, live) {
+  const ping = match.serverInfo?.playerServerInfos?.find((p) => lower(p.battleTag) === lower(state.me))?.averagePing;
+  return `<div class="ctx"><span class="label" style="color:${live ? "var(--live)" : "var(--muted)"}">${label}</span><span><b>${esc(match.mapName || match.map)}</b>${MODES[match.gameMode] ? " · " + esc(MODES[match.gameMode]) : ""}${match.serverInfo?.name ? " · " + esc(match.serverInfo.name) : ""}${ping ? " · 핑 " + ping : ""}${live ? "" : " · " + day(match.startTime)}</span></div>`;
+}
+function renderMatch(box, match, live, label) {
+  const mine = findMe(match);
+  const opps = match.teams.filter((t) => t !== mine?.team).flatMap((t) => t.players);
+  box.innerHTML = matchCtx(match, label, live);
+  for (const o of opps) {
+    const el = document.createElement("section");
+    el.className = "card" + (live ? " live" : "");
+    box.appendChild(el);
+    renderOpponent(el, o, { race: o.race, mmr: o.oldMmr, gameMode: match.gameMode, live, myRace: mine?.pl.race });
+  }
+  if (!opps.length) box.insertAdjacentHTML("beforeend", `<div class="card idle">상대 정보가 없는 경기입니다.</div>`);
+}
+
+/* ---------- top slot: the opponent of the match I'm in right now ---------- */
+function liveIdle(text) {
+  $("#live").innerHTML = `<div class="waitbar"><span class="dot"></span><span>${text}</span></div>`;
+}
+
+/* ---------- my match history ---------- */
+const hist = { offset: 0, total: 0, byId: new Map(), loading: false };
+async function loadHistory(reset) {
+  if (hist.loading) return;
+  hist.loading = true;
+  const box = $("#hist");
+  const season = state.mySeasons[0] ?? state.current;
+  if (reset) { hist.offset = 0; hist.byId.clear(); box.innerHTML = `<div class="loading">경기 기록을 불러오는 중…</div>`; }
+  try {
+    const d = await get(`/matches/search?playerId=${encodeURIComponent(state.me)}&gateway=${GW}&offset=${hist.offset}&pageSize=20&season=${season}`);
+    const list = d?.matches || [];
+    hist.total = d?.count || 0;
+    $("#histTitle").textContent = `내 경기 기록 · 시즌 ${season} · ${hist.total}경기`;
+    if (reset) box.innerHTML = list.length ? "" : `<div class="empty">이번 시즌 경기 기록이 없습니다.</div>`;
+    for (const m of list) { hist.byId.set(m.id, m); box.insertAdjacentHTML("beforeend", histRow(m)); }
+    hist.offset += list.length;
+    $("#histMore").hidden = hist.offset >= hist.total;
+    $("#histMore").textContent = `더 보기 (${hist.offset}/${hist.total})`;
+  } catch (e) {
+    if (reset) box.innerHTML = `<div class="empty">경기 기록을 불러오지 못했습니다 (${esc(e.message)}).</div>`;
+  }
+  hist.loading = false;
+}
+function histRow(m) {
+  const mine = findMe(m); if (!mine) return "";
+  const opp = m.teams.filter((t) => t !== mine.team).flatMap((t) => t.players)[0];
+  const won = mine.pl.won;
+  const gain = mine.pl.mmrGain ?? (mine.pl.currentMmr - mine.pl.oldMmr);
+  return `<button type="button" class="hrow" data-mid="${esc(m.id)}">
+    <span class="res ${won ? "w" : "l"}">${won ? "승" : "패"}</span>
+    <span class="hmain">
+      <span class="hopp">${rc(opp?.race)}<b>${esc(opp?.name || "-")}</b><span class="mmr">${opp?.oldMmr ?? ""}</span></span>
+      <span class="hheroes"><span class="heroes">${heroList(mine.pl)}</span><span class="vs">vs</span><span class="heroes">${heroList(opp)}</span></span>
+      <span class="hmeta">${day(m.startTime)} · ${esc(m.mapName || m.map)} · ${dur(m.durationInSeconds)}${m.gameMode !== 1 && MODES[m.gameMode] ? " · " + esc(MODES[m.gameMode]) : ""}</span>
+    </span>
+    <span class="gain ${gain >= 0 ? "w" : "l"}">${Number.isFinite(gain) ? (gain >= 0 ? "+" : "") + gain : ""}</span>
+  </button>`;
+}
+$("#hist").addEventListener("click", (e) => {
+  const b = e.target.closest(".hrow"); if (!b) return;
+  const m = hist.byId.get(b.dataset.mid);
+  if (m) openDetail((box) => renderMatch(box, m, false, `${day(m.startTime)} 경기 상대`));
+});
+$("#histMore").onclick = () => loadHistory(false);
+
+/* ---------- detail view (a past opponent or a manual lookup) ---------- */
+let histScroll = 0;
+function openDetail(fill) {
+  histScroll = window.scrollY;
+  $("#history").hidden = true;
+  const d = $("#detail"); d.hidden = false;
+  d.innerHTML = `<button type="button" class="back" id="back">← 내 경기 기록</button><div class="slot"></div>`;
+  $("#back").onclick = closeDetail;
+  fill(d.querySelector(".slot"));
+  d.scrollIntoView({ block: "start" });
+}
+function closeDetail() {
+  const d = $("#detail"); d.hidden = true; d.innerHTML = "";
+  $("#history").hidden = false;
+  window.scrollTo(0, histScroll);
+}
+
+/* ---------- polling ---------- */
+let timer = null;
+async function poll() {
+  clearTimeout(timer);
+  try {
+    const m = await get(`/matches/ongoing/${encodeURIComponent(state.me)}`);
+    if (m && m.teams) {
+      setStatus("live", "경기 중");
+      if (m.id !== state.liveId) {
+        state.liveId = m.id;
+        if (navigator.vibrate) navigator.vibrate(200);
+        renderMatch($("#live"), m, true, "지금 경기 중");
+        window.scrollTo({ top: 0 });
+      }
+    } else {
+      setStatus("idle", "대기 중 · 자동 확인");
+      if (state.liveId || !state.idleShown) {
+        const ended = !!state.liveId;
+        state.liveId = null; state.idleShown = true;
+        liveIdle("대기 중 · 게임에 들어가면 여기에 상대가 뜹니다");
+        if (ended) loadHistory(true);
+      }
+    }
+  } catch (e) {
+    setStatus("err", "연결 실패 · 재시도 중");
+    if (!state.liveId) { state.idleShown = false; liveIdle("W3Champions에 연결하지 못했습니다 · 5초마다 다시 시도"); }
+  }
+  if (!document.hidden) timer = setTimeout(poll, POLL_MS);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { poll(); reWake(); } else clearTimeout(timer); });
+
+/* ---------- my tag ---------- */
+function renderMe() { $("#meBtn").textContent = state.me; }
+$("#meBtn").onclick = () => { $("#meInput").value = state.me; $("#meDlg").showModal(); };
+$("#meForm").addEventListener("submit", async () => {
+  const v = $("#meInput").value.trim();
+  if (!v.includes("#")) return;
+  state.me = v; store("w3c_me", v); renderMe();
+  await boot();
+});
+
+/* ---------- manual lookup ---------- */
+$("#find").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const v = $("#findInput").value.trim();
+  if (!v.includes("#")) { $("#findInput").value = ""; $("#findInput").placeholder = "#숫자까지 입력하세요 (예: Lukas#21464)"; return; }
+  const p = await get(`/players/${encodeURIComponent(v)}`).catch(() => null);
+  if (!p) { $("#findInput").value = ""; $("#findInput").placeholder = `${v} 플레이어를 찾을 수 없습니다`; return; }
+  const main = (p.winLosses || []).filter((w) => w.games).sort((a, b) => b.games - a.games)[0];
+  openDetail((box) => {
+    box.innerHTML = `<div class="ctx"><span class="label">직접 조회</span></div>`;
+    const el = document.createElement("section"); el.className = "card"; box.appendChild(el);
+    renderOpponent(el, { battleTag: p.battleTag, name: p.name }, { race: main?.race, gameMode: 1 });
+  });
+});
+
+/* ---------- keep screen on ---------- */
+let lock = null, wantLock = false;
+async function reWake() { if (wantLock && !lock) try { lock = await navigator.wakeLock.request("screen"); lock.addEventListener("release", () => { lock = null; }); } catch {} }
+$("#wake").onclick = async () => {
+  wantLock = !wantLock;
+  if (wantLock) await reWake(); else { await lock?.release(); lock = null; }
+  $("#wake").classList.toggle("on", wantLock && !!lock);
+  if (wantLock && !lock) { wantLock = false; $("#wake").textContent = "지원 안 됨"; }
+};
+
+/* ---------- boot ---------- */
+async function boot() {
+  state.liveId = null; state.idleShown = false;
+  if (!$("#detail").hidden) closeDetail();
+  liveIdle("연결 중…");
+  try {
+    const [seasons, mine] = await Promise.all([get("/ladder/seasons"), seasonsOf(state.me)]);
+    state.current = seasons?.[0]?.id;
+    state.mySeasons = mine.seasons;
+    state.myRace = (mine.profile?.winLosses || []).filter((w) => w.games).sort((a, b) => b.games - a.games)[0]?.race;
+  } catch {}
+  poll();
+  loadHistory(true);
+}
+fetch(API + "/ladder/active-modes").then((r) => r.json()).then((l) => { for (const m of l) if (!MODES[m.id]) MODES[m.id] = m.name; }).catch(() => {});
+renderMe();
+boot();
+</script>
+</body>
+</html>
