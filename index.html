@@ -93,6 +93,7 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .sline.alert { background: color-mix(in srgb, var(--live) 16%, transparent); border-radius: 8px; padding: 4px 8px; margin-inline: -8px; }
 .sline.alert .sv, .sline.alert .sk { color: var(--live); }
 .sfoot { font-size: .7rem; color: var(--muted); }
+.smeta { font: 500 .72rem var(--body); color: var(--muted); margin-top: 2px; }
 details.all { border-top: 1px solid var(--line); }
 details.all > summary { cursor: pointer; list-style: none; padding: 12px 14px; color: var(--muted); font-size: .86rem; }
 details.all > summary::-webkit-details-marker { display: none; }
@@ -359,10 +360,10 @@ async function renderOpponent(el, opp, info) {
 
     const pool = [];
     const scout = el.querySelector(".scout-ana");
-    const paint = (pending) => { if (el.isConnected) scout.innerHTML = scoutHtml(pool, myRaceName, pending); };
+    const paint = (pending) => { if (el.isConnected) scout.innerHTML = scoutHtml(pool, myRaceName, pending, info.map); };
     (async () => {
       const h2hGames = h2h.slice(0, UNIT_GAMES);
-      if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onResult: (o, me) => { pool.push({ o, me, vsMe: true }); paint(true); } });
+      if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onResult: (o, me, m) => { pool.push({ o, me, vsMe: true, map: m.mapName }); paint(true); } });
       if (!el.isConnected) return;
       const vs = el.querySelector(".vsr");
       const games = await vsRaceGames(tag, myRace, seasons, new Set(h2h.map((m) => m.id))).catch(() => []);
@@ -371,7 +372,7 @@ async function renderOpponent(el, opp, info) {
       vs.innerHTML = `<div class="sec-h"><span class="label">상대 vs ${myRaceName} 최근 ${games.length}경기</span>${games.length ? `<span class="h2h-sum"><span class="w">${w}승</span> <span class="l">${games.length - w}패</span></span>` : ""}</div>`
         + (games.length ? `<div class="games">${games.map((m) => gameRow(m, tag, ["상대", "vs"], true)).join("")}</div>`
           : `<div class="empty">최근 두 시즌에 ${myRaceName} 상대 1v1 기록이 없습니다.</div>`);
-      if (games.length) { paint(true); await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false, onResult: (o) => { pool.push({ o, vsMe: false }); paint(true); } }); }
+      if (games.length) { paint(true); await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false, onResult: (o, me, m) => { pool.push({ o, vsMe: false, map: m.mapName }); paint(true); } }); }
       paint(false);
     })();
   } catch (e) {
@@ -380,7 +381,7 @@ async function renderOpponent(el, opp, info) {
 }
 
 // The glanceable summary: one big line per thing that changes how I play this game.
-function scoutHtml(pool, myRaceName, pending) {
+function scoutHtml(pool, myRaceName, pending, mapName) {
   const line = (k, v, cls = "") => `<div class="sline ${cls}"><span class="sk">${k}</span><span class="sv">${v}</span></div>`;
   if (!pool.length) return pending ? line("", `<span class="wait">리플레이 분석 중…</span>`) : line("", `<span class="wait">분석할 리플레이가 없습니다</span>`);
   const n = pool.length;
@@ -405,6 +406,12 @@ function scoutHtml(pool, myRaceName, pending) {
   if (army6.length) out.push(line("초반", `6분까지 병력 ${Math.round(avg(army6))}기`));
   const latest = pool[0].o.heroes[0];
   if (latest) out.push(line("스킬", `${nm(HERO_CODES, latest.id)} ${latest.skills.slice(0, 3).map((s) => nm(SKILLS, s)).join(" → ")}`));
+  const withRoute = pool.filter((x) => x.o.route?.stops.length);
+  const pick = withRoute.find((x) => mapName && x.map === mapName) || withRoute[0];
+  if (pick) {
+    const same = mapName && pick.map === mapName;
+    out.push(line("동선", `${routeText(pick.o.route, pick.vsMe ? "내 진영" : "상대편 진영")}<div class="smeta">${esc(pick.map || "")} · 시작 ${pick.o.route.start}${same ? " · <b class=\"good\">같은 맵</b>" : ""}</div>`));
+  }
   const vsMe = pool.filter((x) => x.vsMe).length;
   out.push(`<div class="sfoot">리플레이 ${n}경기 기준 (나와 ${vsMe} · 다른 ${myRaceName} ${n - vsMe})${pending ? " · 분석 중…" : ""}</div>`);
   return out.join("");
@@ -516,8 +523,51 @@ function loadParser() {
   return parserPromise;
 }
 
+/* creep route: where a player sent commands away from their own base, in 30s windows.
+   Replays only hold commands, so this is where they clicked, not proof of what they killed. */
+function baseOf(points) {
+  const early = (points || []).filter(([ms]) => ms < 40000);
+  if (!early.length) return null;
+  const xs = early.map((p) => p[1]).sort((a, b) => a - b), ys = early.map((p) => p[2]).sort((a, b) => a - b);
+  return [xs[xs.length >> 1], ys[ys.length >> 1]];
+}
+function compass(x, y, T) {
+  const h = x < -T ? "왼쪽" : x > T ? "오른쪽" : "";
+  const v = y > T ? "위" : y < -T ? "아래" : "";
+  return h && v ? `${h} ${v}` : h || v || "가운데";
+}
+function routeOf(points, own, enemy) {
+  if (!own || !enemy || !points?.length) return null;
+  const cx = (own[0] + enemy[0]) / 2, cy = (own[1] + enemy[1]) / 2;
+  const span = Math.hypot(own[0] - enemy[0], own[1] - enemy[1]);
+  if (span < 1000) return null;
+  const T = span / 2 / Math.SQRT2 / 2.2;
+  const ownDir = compass(own[0] - cx, own[1] - cy, T), enemyDir = compass(enemy[0] - cx, enemy[1] - cy, T);
+  const d = (p, b) => Math.hypot(p[1] - b[0], p[2] - b[1]);
+  const label = (p) => {
+    if (d(p, own) < span * 0.2) return null;
+    if (d(p, enemy) < span * 0.2) return "@enemy";
+    const c = compass(p[1] - cx, p[2] - cy, T);
+    return c === ownDir ? "@own" : c === enemyDir ? "@enemy" : c;
+  };
+  const stops = [];
+  for (let t = 90000; t < 450000; t += 30000) {
+    const c = {};
+    for (const p of points) if (p[0] >= t && p[0] < t + 30000) { const l = label(p); if (l) c[l] = (c[l] || 0) + (l === "@enemy" ? 2 : 1); }
+    const best = Object.entries(c).sort((a, b) => b[1] - a[1])[0];
+    if (!best || best[1] < 2) continue;
+    if (stops.length && stops[stops.length - 1][1] === best[0]) continue;
+    stops.push([t, best[0]]);
+  }
+  return { start: ownDir, stops };
+}
+function routeText(r, enemyName) {
+  if (!r || !r.stops.length) return "";
+  return r.stops.map(([t, l]) => `${mmss(t)} ${l === "@own" ? "본진 주변" : l === "@enemy" ? enemyName : l}`).join(" → ");
+}
+
 // Condense one player's replay data into what the card shows; this is what gets cached.
-function digest(p) {
+function digest(p, route) {
   const builds = dedupe(p.buildings, true);
   const seen = new Set(); const firstUnits = [];
   for (const [id, ms] of p.unitOrder || []) if (!WORKERS.has(id) && !seen.has(id)) { seen.add(id); firstUnits.push([id, ms]); }
@@ -530,18 +580,23 @@ function digest(p) {
     items: dedupe(p.items).slice(0, 14),
     upgrades: dedupe(p.upgrades),
     heroes: (p.heroes || []).map((h) => ({ id: h.id, level: h.level, retrain: h.retrain, skills: h.skills.map((s) => s[0]).slice(0, 10) })),
+    route,
   };
 }
 
 async function analysisOf(matchId) {
-  const key = "w3c_a3_" + matchId;
+  const key = "w3c_a4_" + matchId;
   const hit = store(key); if (hit) try { return JSON.parse(hit); } catch {}
   const W3G = await loadParser();
   const res = await fetch(`${API}/replays/${encodeURIComponent(matchId)}`);
   if (!res.ok) throw new Error("리플레이 없음");
   const r = await W3G.parseReplay(await res.arrayBuffer());
   const out = {};
-  for (const p of r.players) out[lower(p.name)] = digest(p);
+  const bases = r.players.map((p) => baseOf(p.points));
+  r.players.forEach((p, i) => {
+    const j = r.players.length === 2 ? 1 - i : -1;
+    out[lower(p.name)] = digest(p, j >= 0 ? routeOf(p.points, bases[i], bases[j]) : null);
+  });
   store(key, JSON.stringify(out));
   return out;
 }
@@ -554,6 +609,7 @@ function detailHtml(o, me, other = "나") {
   return `<details class="more"><summary>빌드 · 스킬 · 아이템 자세히</summary>
     <dl>
       <dt>빌드 (6분까지)</dt><dd class="flow">${build}</dd>
+      ${o.route?.stops.length ? `<dt>크립 동선 (시작 ${o.route.start})</dt><dd>${routeText(o.route, other === "나" ? "내 진영" : "상대편 진영")}</dd>` : ""}
       <dt>영웅 스킬 순서</dt><dd>${o.heroes.map((h) => `<div>${skillLine(h)}</div>`).join("") || "-"}</dd>
       <dt>아이템</dt><dd class="flow">${timeline(o.items, ITEMS)}</dd>
       <dt>업그레이드</dt><dd class="flow">${timeline(o.upgrades, UPGRADES)}</dd>
@@ -605,7 +661,7 @@ async function analyzeUnits(el, sec, tag, games, opt) {
       if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="heroes">${unitList(o.units)}</span></div>${detailHtml(o, me, opt.other)}`;
       for (const [k, n] of Object.entries(o.units || {})) if (!WORKERS.has(k)) total[k] = (total[k] || 0) + n;
       list.push({ o, me });
-      opt.onResult?.(o, me);
+      opt.onResult?.(o, me, m);
       if (sum) sum.innerHTML = summaryHtml(list, total, games.length, opt);
     } catch (e) {
       if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">${esc(e.message)}</span></div>`;
@@ -627,7 +683,7 @@ function renderMatch(box, match, live, label) {
     const el = document.createElement("section");
     el.className = "card" + (live ? " live" : "");
     box.appendChild(el);
-    renderOpponent(el, o, { race: o.race, mmr: o.oldMmr, gameMode: match.gameMode, live, myRace: mine?.pl.race });
+    renderOpponent(el, o, { race: o.race, mmr: o.oldMmr, gameMode: match.gameMode, live, myRace: mine?.pl.race, map: match.mapName });
   }
   if (!opps.length) box.insertAdjacentHTML("beforeend", `<div class="card idle">상대 정보가 없는 경기입니다.</div>`);
 }
