@@ -97,6 +97,21 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .sline.alert .sv, .sline.alert .sk { color: var(--live); }
 .sfoot { font-size: .7rem; color: var(--muted); }
 .smeta { font: 500 .72rem var(--body); color: var(--muted); margin-top: 2px; }
+.memo-slot { padding: 0 14px; }
+.memo { margin-top: 4px; }
+.memo.has, .memo.editing { background: color-mix(in srgb, var(--gold) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line)); border-radius: 10px; padding: 9px 11px; display: grid; gap: 6px; }
+.memo-h { display: flex; align-items: center; gap: 8px; }
+.memo-h .label { color: var(--gold); }
+.memo-at { font-size: .7rem; color: var(--muted); }
+.memo-text { font-size: 1.02rem; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.memo button { background: none; border: 0; color: var(--gold); font-weight: 700; font-size: .8rem; padding: 2px 0; }
+.memo-h .memo-edit { margin-left: auto; }
+.memo-edit.add { color: var(--muted); font-weight: 500; }
+.memo-input { width: 100%; background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 500 .95rem var(--body); resize: vertical; }
+.memo-btns { display: flex; gap: 14px; }
+.memo-btns .memo-save { background: var(--gold); color: #1a1205; border-radius: 8px; padding: 6px 14px; }
+.memo-btns .memo-del { margin-left: auto; color: var(--loss); }
+.memo-mark { font-size: .66rem; font-weight: 700; color: #1a1205; background: var(--gold); border-radius: 4px; padding: 0 4px; }
 .hskill { line-height: 1.35; }
 .sv .num { font-family: var(--mono); color: var(--gold); }
 .hskill span { font-weight: 500; font-size: .92rem; }
@@ -249,6 +264,42 @@ const lower = (s) => String(s || "").toLowerCase();
 
 function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { return null; } }
 
+/* ---------- my notes about opponents (kept in this browser) ---------- */
+const memoKey = (tag) => "w3c_memo_" + lower(tag);
+function memoGet(tag) { try { return JSON.parse(store(memoKey(tag)) || "null"); } catch { return null; } }
+function memoSet(tag, text) {
+  try {
+    if (text.trim()) localStorage.setItem(memoKey(tag), JSON.stringify({ text: text.trim(), at: new Date().toISOString() }));
+    else localStorage.removeItem(memoKey(tag));
+  } catch {}
+  refreshMemoMarks();
+}
+function memoView(tag) {
+  const m = memoGet(tag);
+  return m
+    ? `<div class="memo has"><div class="memo-h"><span class="label">내 메모</span><span class="memo-at">${day(m.at)}</span><button type="button" class="memo-edit">수정</button></div><div class="memo-text">${esc(m.text).replace(/\n/g, "<br>")}</div></div>`
+    : `<div class="memo"><button type="button" class="memo-edit add">+ 메모 쓰기</button></div>`;
+}
+function memoEditor(tag) {
+  const m = memoGet(tag);
+  return `<div class="memo editing"><div class="memo-h"><span class="label">내 메모</span></div>
+    <textarea class="memo-input" rows="3" placeholder="예: 무조건 워 사냥 저지하러 옴">${esc(m?.text || "")}</textarea>
+    <div class="memo-btns"><button type="button" class="memo-save">저장</button><button type="button" class="memo-cancel">취소</button>${m ? `<button type="button" class="memo-del">삭제</button>` : ""}</div></div>`;
+}
+function mountMemo(box, tag) {
+  box.innerHTML = memoView(tag);
+  box.onclick = (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.classList.contains("memo-edit")) { box.innerHTML = memoEditor(tag); const ta = box.querySelector("textarea"); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    else if (b.classList.contains("memo-save")) { memoSet(tag, box.querySelector("textarea").value); box.innerHTML = memoView(tag); }
+    else if (b.classList.contains("memo-del")) { memoSet(tag, ""); box.innerHTML = memoView(tag); }
+    else if (b.classList.contains("memo-cancel")) box.innerHTML = memoView(tag);
+  };
+}
+function refreshMemoMarks() {
+  document.querySelectorAll(".hside.theirs[data-tag]").forEach((el) => { el.querySelector(".memo-mark")?.toggleAttribute("hidden", !memoGet(el.dataset.tag)); });
+}
+
 const state = { me: store("w3c_me") || "winslin#3872", liveId: null, idleShown: false, seasons: null, current: null, mySeasons: [] };
 
 async function get(path) {
@@ -307,6 +358,8 @@ async function renderOpponent(el, opp, info) {
   const [, rVar, rLetter] = race(info.race);
   el.style.setProperty("--c", `var(${rVar})`);
   el.innerHTML = `<div class="head"><div class="who"><div class="crest">${rLetter}</div><div style="min-width:0"><div class="name">${esc(opp.name || tag.split("#")[0])}</div><div class="sub1">불러오는 중…</div></div></div></div>`;
+  el.insertAdjacentHTML("beforeend", `<div class="memo-slot"></div>`);
+  mountMemo(el.querySelector(".memo-slot"), tag);
 
   try {
     const { profile, seasons } = await seasonsOf(tag);
@@ -350,6 +403,7 @@ async function renderOpponent(el, opp, info) {
           </div>
         </div>
       </div>
+      <div class="memo-slot"></div>
       <div class="scout">
         <div class="sline"><span class="sk">나와</span><span class="sv">${h2h.length ? `${h2h.length}전 <span class="w">${wins}승</span> <span class="l">${h2h.length - wins}패</span>` : "첫 대결"}</span></div>
         <div class="hero-line">${heroLineHtml(fh, rec.length, [])}</div>
@@ -370,6 +424,7 @@ async function renderOpponent(el, opp, info) {
         </div>
       </details>`;
 
+    mountMemo(el.querySelector(".memo-slot"), tag);
     const pool = [];
     const scout = el.querySelector(".scout-ana");
     const paint = (pending) => {
@@ -750,8 +805,8 @@ function histRow(m) {
   const mine = findMe(m); if (!mine) return "";
   const opp = m.teams.filter((t) => t !== mine.team).flatMap((t) => t.players)[0];
   const gain = mine.pl.mmrGain ?? (mine.pl.currentMmr - mine.pl.oldMmr);
-  const side = (pl, cls) => `<span class="hside ${cls}">
-      <span class="hname">${rc(pl?.race)}<b>${esc(pl?.name || "-")}</b></span>
+  const side = (pl, cls) => `<span class="hside ${cls}"${cls === "theirs" ? ` data-tag="${esc(pl?.battleTag || "")}"` : ""}>
+      <span class="hname">${cls === "theirs" ? `<span class="memo-mark"${memoGet(pl?.battleTag || "") ? "" : " hidden"}>메모</span>` : ""}${rc(pl?.race)}<b>${esc(pl?.name || "-")}</b></span>
       <span class="hres"><span class="mmr">(${pl?.oldMmr ?? "-"})</span> <span class="res ${pl?.won ? "w" : "l"}">${pl?.won ? "승" : "패"}</span></span>
       <span class="heroes">${heroList(pl)}</span>
     </span>`;
