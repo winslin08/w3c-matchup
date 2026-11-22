@@ -97,6 +97,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .sline.alert .sv, .sline.alert .sk { color: var(--live); }
 .sfoot { font-size: .7rem; color: var(--muted); }
 .smeta { font: 500 .72rem var(--body); color: var(--muted); margin-top: 2px; }
+.hskill { line-height: 1.35; }
+.hskill span { font-weight: 500; font-size: .92rem; }
 details.all { border-top: 1px solid var(--line); }
 details.all > summary { cursor: pointer; list-style: none; padding: 12px 14px; color: var(--muted); font-size: .86rem; }
 details.all > summary::-webkit-details-marker { display: none; }
@@ -349,7 +351,7 @@ async function renderOpponent(el, opp, info) {
       </div>
       <div class="scout">
         <div class="sline"><span class="sk">나와</span><span class="sv">${h2h.length ? `${h2h.length}전 <span class="w">${wins}승</span> <span class="l">${h2h.length - wins}패</span>` : "첫 대결"}</span></div>
-        <div class="sline"><span class="sk">영웅</span><span class="sv">${fh.length ? `${fh.slice(0, 2).map(([n]) => esc(n)).join(" · ")}<div class="smeta">첫 영웅 · 최근 ${rec.length}경기 중 ${fh.slice(0, 2).map(([n, c]) => `${esc(n)} ${c}번`).join(", ")}</div>` : "-"}</span></div>
+        <div class="hero-line">${heroLineHtml(fh, rec.length, [])}</div>
         <div class="scout-ana"><div class="sline"><span class="sk"></span><span class="sv wait">리플레이 분석 중…</span></div></div>
       </div>
       <details class="all">
@@ -369,7 +371,11 @@ async function renderOpponent(el, opp, info) {
 
     const pool = [];
     const scout = el.querySelector(".scout-ana");
-    const paint = (pending) => { if (el.isConnected) scout.innerHTML = scoutHtml(pool, myRaceName, pending, info.map); };
+    const paint = (pending) => {
+      if (!el.isConnected) return;
+      scout.innerHTML = scoutHtml(pool, myRaceName, pending, info.map);
+      el.querySelector(".hero-line").innerHTML = heroLineHtml(fh, rec.length, pool);
+    };
     (async () => {
       const h2hGames = h2h.slice(0, UNIT_GAMES);
       if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onResult: (o, me, m) => { pool.push({ o, me, vsMe: true, map: m.mapName }); paint(true); } });
@@ -390,6 +396,16 @@ async function renderOpponent(el, opp, info) {
 }
 
 // The glanceable summary: one big line per thing that changes how I play this game.
+// Hero line: the opponent's heroes in pick order with skill order, from the newest analysed replay.
+function heroLineHtml(fh, recCount, pool) {
+  const meta = fh.length ? `<div class="smeta">첫 영웅 · 최근 ${recCount}경기 중 ${fh.slice(0, 2).map(([n, c]) => `${esc(n)} ${c}번`).join(", ")}</div>` : "";
+  const heroes = pool[0]?.o.heroes || [];
+  const body = heroes.length
+    ? heroes.map((h) => `<div class="hskill"><b>${nm(HERO_CODES, h.id)}</b> <span>${h.skills.map((x) => nm(SKILLS, x)).join(" → ") || "-"}</span></div>`).join("")
+    : fh.length ? fh.slice(0, 2).map(([n]) => esc(n)).join(" · ") : "-";
+  return `<div class="sline"><span class="sk">영웅</span><span class="sv">${body}${meta}</span></div>`;
+}
+
 function scoutHtml(pool, myRaceName, pending, mapName) {
   const line = (k, v, cls = "") => `<div class="sline ${cls}"><span class="sk">${k}</span><span class="sv">${v}</span></div>`;
   if (!pool.length) return pending ? line("", `<span class="wait">리플레이 분석 중…</span>`) : line("", `<span class="wait">분석할 리플레이가 없습니다</span>`);
@@ -409,12 +425,10 @@ function scoutHtml(pool, myRaceName, pending, mapName) {
   if (t2.length) { const a = avg(t2); tech.push(`2티어 ${mmss(a)}${a < 180000 ? ' <b class="warn">빠름</b>' : ""}`); }
   if (t3.length) { const a = avg(t3); tech.push(`3티어 ${mmss(a)}${a < 480000 ? ' <b class="warn">빠름</b>' : ""}${t3.length < n ? ` <small>${n}경기 중 ${t3.length}번</small>` : ""}`); }
   else tech.push("3티어 안 감");
-  out.push(line("테크", tech.join(" · ")));
+  out.push(line("테크", `${tech.join(" · ")}<div class="smeta">티어 올리기 시작한 시각 (완성 시각 아님)</div>`));
   if (ex.length) { const a = avg(ex); out.push(line("멀티", `${mmss(a)}${a < 360000 ? ' <b class="warn">빠름</b>' : a > 720000 ? " 늦음" : ""} <small>${n}경기 중 ${ex.length}번</small>`)); }
   else out.push(line("멀티", "안 함"));
   if (army6.length) out.push(line("초반", `6분까지 병력 ${Math.round(avg(army6))}기`));
-  const latest = pool[0].o.heroes[0];
-  if (latest) out.push(line("스킬", `${nm(HERO_CODES, latest.id)} ${latest.skills.slice(0, 3).map((s) => nm(SKILLS, s)).join(" → ")}`));
   const withRoute = pool.filter((x) => x.o.route?.stops.length);
   const pick = withRoute.find((x) => mapName && x.map === mapName) || withRoute[0];
   if (pick) {
