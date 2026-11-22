@@ -77,9 +77,7 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { background: var(--panel2); border-radius: 999px; padding: 3px 10px; font-size: .8rem; }
 .chip b { color: var(--gold); font-family: var(--mono); margin-left: 4px; }
-.rc { display: inline-grid; place-items: center; width: 1.45em; height: 1.45em; color: #0b0f12; background: var(--c); border-radius: 5px; margin-right: 3px; vertical-align: -0.3em; flex: none; }
-.rc svg { width: 78%; height: 78%; }
-.crest svg { width: 30px; height: 30px; }
+.rc { display: inline-block; font-size: .68rem; font-weight: 700; color: #0b0f12; background: var(--c); border-radius: 4px; padding: 0 5px; margin-right: 2px; }
 .empty { color: var(--muted); font-size: .86rem; }
 .sub1 { font-size: .9rem; color: var(--muted); margin-top: 2px; }
 .mmr-big { font: 700 1.25rem var(--mono); color: var(--ink); }
@@ -235,17 +233,7 @@ let MODES = { 1: "1v1", 2: "2v2", 4: "4v4", 5: "FFA", 6: "2v2 AT" };
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const race = (r) => RACES[r] || ["?", "--rnd", "?"];
-// Simple original race emblems (not Blizzard art): shield, double axe, crescent, skull, question mark.
-const RACE_ICON = {
-  1: '<path d="M12 2.5l7.5 2.8v5.9c0 4.8-3.2 8.6-7.5 10.3-4.3-1.7-7.5-5.5-7.5-10.3V5.3z"/>',
-  2: '<path d="M11 1.5h2v21h-2z"/><path d="M13.6 3.5c5 0 8.4 3 8.4 7.5s-3.4 7.5-8.4 7.5z"/><path d="M10.4 3.5c-5 0-8.4 3-8.4 7.5s3.4 7.5 8.4 7.5z"/>',
-  4: '<path d="M14.5 2.5a9.5 9.5 0 1 0 7 15.6A7.6 7.6 0 0 1 14.5 2.5z"/>',
-  8: '<path fill-rule="evenodd" d="M12 2.5a8 8 0 0 0-8 8c0 3 1.6 5.2 4 6.3v4.7h8v-4.7c2.4-1.1 4-3.3 4-6.3a8 8 0 0 0-8-8zM7.3 11a1.9 1.9 0 1 0 3.8 0 1.9 1.9 0 1 0-3.8 0zm5.6 0a1.9 1.9 0 1 0 3.8 0 1.9 1.9 0 1 0-3.8 0z"/>',
-};
-const raceSvg = (r) => RACE_ICON[r]
-  ? `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">${RACE_ICON[r]}</svg>`
-  : `<svg viewBox="0 0 24 24" aria-hidden="true"><text x="12" y="18" text-anchor="middle" font-size="17" font-weight="900" fill="currentColor">?</text></svg>`;
-const rc = (r) => `<span class="rc" style="--c:var(${race(r)[1]})" title="${race(r)[0]}" role="img" aria-label="${race(r)[0]}">${raceSvg(r)}</span>`;
+const rc = (r) => `<span class="rc" style="--c:var(${race(r)[1]})">${race(r)[0]}</span>`;
 const pct = (x) => Math.round(x * 100) + "%";
 const heroName = (h) => HEROES[h.name] || h.name;
 const heroList = (pl) => (pl?.heroes || []).map((h) => `<span class="hero">${esc(heroName(h))}<i>${h.level}</i></span>`).join("") || `<span class="empty">-</span>`;
@@ -312,7 +300,7 @@ async function renderOpponent(el, opp, info) {
   const myRaceName = race(myRace)[0];
   const [, rVar, rLetter] = race(info.race);
   el.style.setProperty("--c", `var(${rVar})`);
-  el.innerHTML = `<div class="head"><div class="who"><div class="crest" title="${race(info.race)[0]}">${raceSvg(info.race)}</div><div style="min-width:0"><div class="name">${esc(opp.name || tag.split("#")[0])}</div><div class="sub1">불러오는 중…</div></div></div></div>`;
+  el.innerHTML = `<div class="head"><div class="who"><div class="crest">${rLetter}</div><div style="min-width:0"><div class="name">${esc(opp.name || tag.split("#")[0])}</div><div class="sub1">불러오는 중…</div></div></div></div>`;
 
   try {
     const { profile, seasons } = await seasonsOf(tag);
@@ -349,7 +337,7 @@ async function renderOpponent(el, opp, info) {
     el.innerHTML = `
       <div class="head">
         <div class="who">
-          <div class="crest" title="${race(info.race)[0]}">${raceSvg(info.race)}</div>
+          <div class="crest">${rLetter}</div>
           <div style="min-width:0">
             <div class="name">${esc(profile?.name || opp.name || tag)}</div>
             <div class="sub1"><b class="mmr-big">${mmr ?? "-"}</b> MMR · <span class="gold">${lg}</span>${st ? ` · 승률 ${pct(st.winrate)}` : ""}${streak >= 2 ? ` · <b class="${sw ? "warn" : "good"}">${streak}${sw ? "연승" : "연패"}</b>` : ""}</div>
