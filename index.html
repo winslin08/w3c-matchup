@@ -103,16 +103,22 @@ details.all[open] > summary::before { content: "▾ "; }
 .waitbar { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 12px 14px; color: var(--muted); font-size: .86rem; }
 .waitbar .dot { background: var(--win); }
 .hist { display: grid; gap: 6px; }
-.hrow { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; align-items: start; text-align: left; width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.hrow { display: grid; gap: 6px; text-align: left; width: 100%; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.hrow.won { border-left-color: var(--win); } .hrow.lost { border-left-color: var(--loss); }
 .hrow:active { background: var(--panel2); }
-.hmain { display: grid; gap: 3px; min-width: 0; }
-.hopp { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.hopp b { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hopp .mmr { font: 500 .78rem var(--mono); color: var(--muted); }
-.hheroes { display: flex; flex-wrap: wrap; gap: 2px 6px; font-size: .78rem; align-items: baseline; }
-.hheroes .vs { color: var(--muted); font-size: .7rem; }
-.hmeta { font-size: .72rem; color: var(--muted); }
-.gain { font: 700 .86rem var(--mono); padding-top: 1px; }
+.hvs { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: start; }
+.hvs > .vs { color: var(--muted); font-size: .72rem; padding-top: 4px; }
+.hside { display: grid; gap: 2px; min-width: 0; }
+.hside.theirs { text-align: right; justify-items: end; }
+.hname { display: flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; }
+.hname b { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hres { font-size: .84rem; }
+.hres .mmr { font: 500 .78rem var(--mono); color: var(--muted); }
+.hres .res { font-weight: 900; }
+.hside .heroes { font-size: .74rem; gap: 1px 6px; }
+.hside.theirs .heroes { justify-content: flex-end; }
+.hmeta { display: flex; justify-content: space-between; gap: 8px; font-size: .72rem; color: var(--muted); }
+.gain { font: 700 .86rem var(--mono); }
 .gain.w { color: var(--win); } .gain.l { color: var(--loss); }
 .ghost { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; color: var(--ink); }
 .back { justify-self: start; background: none; border: 0; color: var(--gold); font-weight: 700; padding: 4px 0; }
@@ -719,16 +725,15 @@ async function loadHistory(reset) {
 function histRow(m) {
   const mine = findMe(m); if (!mine) return "";
   const opp = m.teams.filter((t) => t !== mine.team).flatMap((t) => t.players)[0];
-  const won = mine.pl.won;
   const gain = mine.pl.mmrGain ?? (mine.pl.currentMmr - mine.pl.oldMmr);
-  return `<button type="button" class="hrow" data-mid="${esc(m.id)}">
-    <span class="res ${won ? "w" : "l"}">${won ? "승" : "패"}</span>
-    <span class="hmain">
-      <span class="hopp">${rc(opp?.race)}<b>${esc(opp?.name || "-")}</b><span class="mmr">${opp?.oldMmr ?? ""}</span></span>
-      <span class="hheroes"><span class="heroes">${heroList(mine.pl)}</span><span class="vs">vs</span><span class="heroes">${heroList(opp)}</span></span>
-      <span class="hmeta">${day(m.startTime)} · ${esc(m.mapName || m.map)} · ${dur(m.durationInSeconds)}${m.gameMode !== 1 && MODES[m.gameMode] ? " · " + esc(MODES[m.gameMode]) : ""}</span>
-    </span>
-    <span class="gain ${gain >= 0 ? "w" : "l"}">${Number.isFinite(gain) ? (gain >= 0 ? "+" : "") + gain : ""}</span>
+  const side = (pl, cls) => `<span class="hside ${cls}">
+      <span class="hname">${rc(pl?.race)}<b>${esc(pl?.name || "-")}</b></span>
+      <span class="hres"><span class="mmr">(${pl?.oldMmr ?? "-"})</span> <span class="res ${pl?.won ? "w" : "l"}">${pl?.won ? "승" : "패"}</span></span>
+      <span class="heroes">${heroList(pl)}</span>
+    </span>`;
+  return `<button type="button" class="hrow ${mine.pl.won ? "won" : "lost"}" data-mid="${esc(m.id)}">
+    <span class="hvs">${side(mine.pl, "mine")}<span class="vs">vs</span>${side(opp, "theirs")}</span>
+    <span class="hmeta"><span>${day(m.startTime)} · ${esc(m.mapName || m.map)} · ${dur(m.durationInSeconds)}${m.gameMode !== 1 && MODES[m.gameMode] ? " · " + esc(MODES[m.gameMode]) : ""}</span><span class="gain ${gain >= 0 ? "w" : "l"}">${Number.isFinite(gain) ? (gain >= 0 ? "+" : "") + gain : ""}</span></span>
   </button>`;
 }
 $("#hist").addEventListener("click", (e) => {
