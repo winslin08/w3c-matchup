@@ -35,6 +35,8 @@ button { cursor: pointer; }
 
 .bar { display: flex; align-items: center; gap: 10px; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 4; background: var(--bg); padding-block: 6px; }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.ptr { position: fixed; left: 50%; top: env(safe-area-inset-top, 0px); z-index: 20; transform: translate(-50%, calc(var(--y, 0px) - 120%)); background: var(--panel2); color: var(--gold); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: .82rem; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity .15s; white-space: nowrap; }
+.ptr.show { opacity: 1; }
 .status { white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; font-size: .82rem; color: var(--muted); }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
 .status.s-live .dot { background: var(--live); box-shadow: 0 0 0 0 var(--live); animation: pulse 1.4s infinite; }
@@ -824,7 +826,9 @@ $("#histMore").onclick = () => loadHistory(false);
 
 /* ---------- detail view (a past opponent or a manual lookup) ---------- */
 let histScroll = 0;
+let detailFill = null;
 function openDetail(fill) {
+  detailFill = fill;
   histScroll = window.scrollY;
   $("#history").hidden = true;
   const d = $("#detail"); d.hidden = false;
@@ -904,6 +908,44 @@ $("#wake").onclick = async () => {
   $("#wake").classList.toggle("on", wantLock && !!lock);
   if (wantLock && !lock) { wantLock = false; $("#wake").textContent = "지원 안 됨"; }
 };
+
+/* ---------- pull down to refresh ---------- */
+async function refreshView() {
+  if (!$("#detail").hidden && detailFill) {
+    const slot = $("#detail .slot");
+    detailFill(slot);
+    await new Promise((r) => setTimeout(r, 600));
+    return;
+  }
+  state.liveId = null; state.idleShown = false;
+  await Promise.all([poll(), loadHistory(true)]);
+}
+(() => {
+  const ptr = document.createElement("div");
+  ptr.className = "ptr"; ptr.setAttribute("aria-live", "polite");
+  document.body.prepend(ptr);
+  const PULL = 90;
+  let startY = null, dist = 0, busy = false;
+  const set = (y, text) => { ptr.style.setProperty("--y", `${y}px`); ptr.textContent = text; };
+  window.addEventListener("touchstart", (e) => {
+    startY = !busy && window.scrollY <= 0 && !e.target.closest("textarea, input, dialog") ? e.touches[0].clientY : null;
+    dist = 0;
+  }, { passive: true });
+  window.addEventListener("touchmove", (e) => {
+    if (startY == null) return;
+    dist = e.touches[0].clientY - startY;
+    if (dist <= 0 || window.scrollY > 0) { ptr.classList.remove("show"); return; }
+    ptr.classList.add("show");
+    set(Math.min(dist * 0.5, 64), dist > PULL ? "놓으면 새로고침" : "당겨서 새로고침");
+  }, { passive: true });
+  window.addEventListener("touchend", async () => {
+    if (startY == null) return;
+    startY = null;
+    if (dist <= PULL) { ptr.classList.remove("show"); return; }
+    busy = true; set(48, "새로고침 중…");
+    try { await refreshView(); } finally { busy = false; ptr.classList.remove("show"); }
+  }, { passive: true });
+})();
 
 /* ---------- boot ---------- */
 async function boot() {
