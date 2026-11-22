@@ -349,7 +349,7 @@ async function renderOpponent(el, opp, info) {
       </div>
       <div class="scout">
         <div class="sline"><span class="sk">나와</span><span class="sv">${h2h.length ? `${h2h.length}전 <span class="w">${wins}승</span> <span class="l">${h2h.length - wins}패</span>` : "첫 대결"}</span></div>
-        <div class="sline"><span class="sk">영웅</span><span class="sv">${fh.length ? fh.slice(0, 2).map(([n, c]) => `${esc(n)} <small>${c}/${rec.length}</small>`).join(" · ") : "-"}</span></div>
+        <div class="sline"><span class="sk">영웅</span><span class="sv">${fh.length ? `${fh.slice(0, 2).map(([n]) => esc(n)).join(" · ")}<div class="smeta">첫 영웅 · 최근 ${rec.length}경기 중 ${fh.slice(0, 2).map(([n, c]) => `${esc(n)} ${c}번`).join(", ")}</div>` : "-"}</span></div>
         <div class="scout-ana"><div class="sline"><span class="sk"></span><span class="sv wait">리플레이 분석 중…</span></div></div>
       </div>
       <details class="all">
@@ -407,10 +407,10 @@ function scoutHtml(pool, myRaceName, pending, mapName) {
   out.push(line("주력", top.join(" · ") || "-"));
   const tech = [];
   if (t2.length) { const a = avg(t2); tech.push(`2티어 ${mmss(a)}${a < 180000 ? ' <b class="warn">빠름</b>' : ""}`); }
-  if (t3.length) { const a = avg(t3); tech.push(`3티어 ${mmss(a)}${a < 480000 ? ' <b class="warn">빠름</b>' : ""}${t3.length < n ? ` <small>${t3.length}/${n}</small>` : ""}`); }
+  if (t3.length) { const a = avg(t3); tech.push(`3티어 ${mmss(a)}${a < 480000 ? ' <b class="warn">빠름</b>' : ""}${t3.length < n ? ` <small>${n}경기 중 ${t3.length}번</small>` : ""}`); }
   else tech.push("3티어 안 감");
   out.push(line("테크", tech.join(" · ")));
-  if (ex.length) { const a = avg(ex); out.push(line("멀티", `${mmss(a)}${a < 360000 ? ' <b class="warn">빠름</b>' : a > 720000 ? " 늦음" : ""} <small>${ex.length}/${n}</small>`)); }
+  if (ex.length) { const a = avg(ex); out.push(line("멀티", `${mmss(a)}${a < 360000 ? ' <b class="warn">빠름</b>' : a > 720000 ? " 늦음" : ""} <small>${n}경기 중 ${ex.length}번</small>`)); }
   else out.push(line("멀티", "안 함"));
   if (army6.length) out.push(line("초반", `6분까지 병력 ${Math.round(avg(army6))}기`));
   const latest = pool[0].o.heroes[0];
@@ -419,7 +419,7 @@ function scoutHtml(pool, myRaceName, pending, mapName) {
   const pick = withRoute.find((x) => mapName && x.map === mapName) || withRoute[0];
   if (pick) {
     const same = mapName && pick.map === mapName;
-    out.push(line("동선", `${routeText(pick.o.route, pick.vsMe ? "내 진영" : "상대편 진영")}<div class="smeta">${esc(pick.map || "")} · 시작 ${pick.o.route.start}${same ? " · <b class=\"good\">같은 맵</b>" : ""}</div>`));
+    if (SHOW_ROUTE) out.push(line("동선", `${routeText(pick.o.route, pick.vsMe ? "내 진영" : "상대편 진영")}<div class="smeta">${esc(pick.map || "")} · 시작 ${pick.o.route.start}${same ? " · <b class=\"good\">같은 맵</b>" : ""}</div>`));
   }
   const vsMe = pool.filter((x) => x.vsMe).length;
   out.push(`<div class="sfoot">리플레이 ${n}경기 기준 (나와 ${vsMe} · 다른 ${myRaceName} ${n - vsMe})${pending ? " · 분석 중…" : ""}</div>`);
@@ -570,6 +570,7 @@ function routeOf(points, own, enemy) {
   }
   return { start: ownDir, stops };
 }
+const SHOW_ROUTE = false; // route display is off for now; routeOf() still runs so it can come back
 function routeText(r, enemyName) {
   if (!r || !r.stops.length) return "";
   return r.stops.map(([t, l]) => `${mmss(t)} ${l === "@own" ? "본진 주변" : l === "@enemy" ? enemyName : l}`).join(" → ");
@@ -618,7 +619,7 @@ function detailHtml(o, me, other = "나") {
   return `<details class="more"><summary>빌드 · 스킬 · 아이템 자세히</summary>
     <dl>
       <dt>빌드 (6분까지)</dt><dd class="flow">${build}</dd>
-      ${o.route?.stops.length ? `<dt>크립 동선 (시작 ${o.route.start})</dt><dd>${routeText(o.route, other === "나" ? "내 진영" : "상대편 진영")}</dd>` : ""}
+      ${SHOW_ROUTE && o.route?.stops.length ? `<dt>크립 동선 (시작 ${o.route.start})</dt><dd>${routeText(o.route, other === "나" ? "내 진영" : "상대편 진영")}</dd>` : ""}
       <dt>영웅 스킬 순서</dt><dd>${o.heroes.map((h) => `<div>${skillLine(h)}</div>`).join("") || "-"}</dd>
       <dt>아이템</dt><dd class="flow">${timeline(o.items, ITEMS)}</dd>
       <dt>업그레이드</dt><dd class="flow">${timeline(o.upgrades, UPGRADES)}</dd>
