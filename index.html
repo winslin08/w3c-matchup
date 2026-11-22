@@ -379,7 +379,7 @@ async function renderOpponent(el, opp, info) {
     };
     (async () => {
       const h2hGames = h2h.slice(0, UNIT_GAMES);
-      if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onResult: (o, me, m) => { pool.push({ o, me, vsMe: true, map: m.mapName }); paint(true); } });
+      if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onResult: (o, me, m) => { pool.push({ o, me, vsMe: true, map: m.mapName, at: m.startTime }); paint(true); } });
       if (!el.isConnected) return;
       const vs = el.querySelector(".vsr");
       const games = await vsRaceGames(tag, myRace, seasons, new Set(h2h.map((m) => m.id))).catch(() => []);
@@ -388,7 +388,7 @@ async function renderOpponent(el, opp, info) {
       vs.innerHTML = `<div class="sec-h"><span class="label">상대 vs ${myRaceName} 최근 ${games.length}경기</span>${games.length ? `<span class="h2h-sum"><span class="w">${w}승</span> <span class="l">${games.length - w}패</span></span>` : ""}</div>`
         + (games.length ? `<div class="games">${games.map((m) => gameRow(m, tag, ["상대", "vs"], true)).join("")}</div>`
           : `<div class="empty">최근 두 시즌에 ${myRaceName} 상대 1v1 기록이 없습니다.</div>`);
-      if (games.length) { paint(true); await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false, onResult: (o, me, m) => { pool.push({ o, vsMe: false, map: m.mapName }); paint(true); } }); }
+      if (games.length) { paint(true); await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false, onResult: (o, me, m) => { pool.push({ o, vsMe: false, map: m.mapName, at: m.startTime }); paint(true); } }); }
       paint(false);
     })();
   } catch (e) {
@@ -398,9 +398,12 @@ async function renderOpponent(el, opp, info) {
 
 // The glanceable summary: one big line per thing that changes how I play this game.
 // Hero line: the opponent's heroes in pick order with skill order, from the newest analysed replay.
+// newest analysed game (pool mixes head-to-head and vs-race games)
+const latestOf = (pool) => pool.reduce((a, x) => (!a || new Date(x.at) > new Date(a.at) ? x : a), null);
+
 function heroLineHtml(fh, recCount, pool) {
   const meta = fh.length ? `<div class="smeta">첫 영웅 · 최근 ${recCount}경기 중 ${fh.slice(0, 2).map(([n, c]) => `${esc(n)} ${c}번`).join(", ")}</div>` : "";
-  const heroes = pool[0]?.o.heroes || [];
+  const heroes = latestOf(pool)?.o.heroes || [];
   const body = heroes.length
     ? heroes.map((h, i) => `<div class="hskill">${i + 1}. <b>${nm(HERO_CODES, h.id)}</b>${h.skills.length ? ` <span>(${h.skills.map((x) => nm(SKILLS, x)).join(" → ")})</span>` : ""}</div>`).join("")
     : fh.length ? fh.slice(0, 2).map(([n]) => esc(n)).join(" · ") + ` <span class="wait">스킬 분석 중…</span>` : "-";
@@ -413,7 +416,8 @@ function scoutHtml(pool, myRaceName, pending, mapName) {
   const n = pool.length;
   const total = {};
   for (const { o } of pool) for (const [k, c] of Object.entries(o.units || {})) if (!WORKERS.has(k)) total[k] = (total[k] || 0) + c;
-  const top = Object.entries(total).map(([k, c]) => [k, Math.round(c / n)]).filter(([, c]) => c >= 1).sort((a, b) => b[1] - a[1]).slice(0, 6)
+  const last = latestOf(pool);
+  const top = Object.entries(last.o.units || {}).filter(([k]) => !WORKERS.has(k)).sort((a, b) => b[1] - a[1]).slice(0, 6)
     .map(([k, c]) => `${esc(UNITS[k] || k)} <span class="num">${c}</span>`);
   const t2 = pool.map((x) => x.o.tier2).filter((v) => v != null);
   const t3 = pool.map((x) => x.o.tier3).filter((v) => v != null);
@@ -422,7 +426,7 @@ function scoutHtml(pool, myRaceName, pending, mapName) {
   const army6 = pool.map((x) => x.o.army6).filter((v) => v != null);
   const out = [];
   if (towers) out.push(line("경고", `초반 타워 ${towers}/${n}경기`, "alert"));
-  out.push(line("유닛", `${top.join(" · ") || "-"}<div class="smeta">한 경기 평균 생산 수 (일꾼 제외)</div>`));
+  out.push(line("유닛", `${top.join(" · ") || "-"}<div class="smeta">직전 경기 생산 수 · ${day(last.at)} ${esc(last.map || "")}${last.vsMe ? " · 나와 한 경기" : ""} (일꾼 제외)</div>`));
   const tech = [];
   if (t2.length) { const a = avg(t2); tech.push(`2티어 ${mmss(a)}${a < 180000 ? ' <b class="warn">빠름</b>' : ""}`); }
   if (t3.length) { const a = avg(t3); tech.push(`3티어 ${mmss(a)}${a < 480000 ? ' <b class="warn">빠름</b>' : ""}${t3.length < n ? ` <small>${n}경기 중 ${t3.length}번</small>` : ""}`); }
