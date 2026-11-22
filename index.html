@@ -98,6 +98,7 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .sfoot { font-size: .7rem; color: var(--muted); }
 .smeta { font: 500 .72rem var(--body); color: var(--muted); margin-top: 2px; }
 .hskill { line-height: 1.35; }
+.sv .num { font-family: var(--mono); color: var(--gold); }
 .hskill span { font-weight: 500; font-size: .92rem; }
 details.all { border-top: 1px solid var(--line); }
 details.all > summary { cursor: pointer; list-style: none; padding: 12px 14px; color: var(--muted); font-size: .86rem; }
@@ -400,12 +401,10 @@ async function renderOpponent(el, opp, info) {
 function heroLineHtml(fh, recCount, pool) {
   const meta = fh.length ? `<div class="smeta">첫 영웅 · 최근 ${recCount}경기 중 ${fh.slice(0, 2).map(([n, c]) => `${esc(n)} ${c}번`).join(", ")}</div>` : "";
   const heroes = pool[0]?.o.heroes || [];
-  const names = heroes.length ? heroes.map((h) => nm(HERO_CODES, h.id)).join(" → ") : fh.length ? fh.slice(0, 2).map(([n]) => esc(n)).join(" · ") : "-";
-  const skills = heroes.length
-    ? heroes.map((h) => `<div class="hskill"><b>${nm(HERO_CODES, h.id)}</b> <span>${h.skills.map((x) => nm(SKILLS, x)).join(" → ") || "-"}</span></div>`).join("")
-    : `<span class="wait">리플레이 분석 중…</span>`;
-  return `<div class="sline"><span class="sk">영웅</span><span class="sv">${names}${meta}</span></div>`
-    + `<div class="sline"><span class="sk">스킬</span><span class="sv">${skills}</span></div>`;
+  const body = heroes.length
+    ? heroes.map((h, i) => `<div class="hskill">${i + 1}. <b>${nm(HERO_CODES, h.id)}</b>${h.skills.length ? ` <span>(${h.skills.map((x) => nm(SKILLS, x)).join(" → ")})</span>` : ""}</div>`).join("")
+    : fh.length ? fh.slice(0, 2).map(([n]) => esc(n)).join(" · ") + ` <span class="wait">스킬 분석 중…</span>` : "-";
+  return `<div class="sline"><span class="sk">영웅</span><span class="sv">${body}${meta}</span></div>`;
 }
 
 function scoutHtml(pool, myRaceName, pending, mapName) {
@@ -414,7 +413,8 @@ function scoutHtml(pool, myRaceName, pending, mapName) {
   const n = pool.length;
   const total = {};
   for (const { o } of pool) for (const [k, c] of Object.entries(o.units || {})) if (!WORKERS.has(k)) total[k] = (total[k] || 0) + c;
-  const top = Object.entries(total).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => esc(UNITS[k] || k));
+  const top = Object.entries(total).map(([k, c]) => [k, Math.round(c / n)]).filter(([, c]) => c >= 1).sort((a, b) => b[1] - a[1]).slice(0, 6)
+    .map(([k, c]) => `${esc(UNITS[k] || k)} <span class="num">${c}</span>`);
   const t2 = pool.map((x) => x.o.tier2).filter((v) => v != null);
   const t3 = pool.map((x) => x.o.tier3).filter((v) => v != null);
   const ex = pool.map((x) => x.o.expo).filter((v) => v != null);
@@ -422,7 +422,7 @@ function scoutHtml(pool, myRaceName, pending, mapName) {
   const army6 = pool.map((x) => x.o.army6).filter((v) => v != null);
   const out = [];
   if (towers) out.push(line("경고", `초반 타워 ${towers}/${n}경기`, "alert"));
-  out.push(line("주력", top.join(" · ") || "-"));
+  out.push(line("유닛", `${top.join(" · ") || "-"}<div class="smeta">한 경기 평균 생산 수 (일꾼 제외)</div>`));
   const tech = [];
   if (t2.length) { const a = avg(t2); tech.push(`2티어 ${mmss(a)}${a < 180000 ? ' <b class="warn">빠름</b>' : ""}`); }
   if (t3.length) { const a = avg(t3); tech.push(`3티어 ${mmss(a)}${a < 480000 ? ' <b class="warn">빠름</b>' : ""}${t3.length < n ? ` <small>${n}경기 중 ${t3.length}번</small>` : ""}`); }
