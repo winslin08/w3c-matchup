@@ -400,10 +400,12 @@ async function renderOpponent(el, opp, info) {
 function heroLineHtml(fh, recCount, pool) {
   const meta = fh.length ? `<div class="smeta">첫 영웅 · 최근 ${recCount}경기 중 ${fh.slice(0, 2).map(([n, c]) => `${esc(n)} ${c}번`).join(", ")}</div>` : "";
   const heroes = pool[0]?.o.heroes || [];
-  const body = heroes.length
+  const names = heroes.length ? heroes.map((h) => nm(HERO_CODES, h.id)).join(" → ") : fh.length ? fh.slice(0, 2).map(([n]) => esc(n)).join(" · ") : "-";
+  const skills = heroes.length
     ? heroes.map((h) => `<div class="hskill"><b>${nm(HERO_CODES, h.id)}</b> <span>${h.skills.map((x) => nm(SKILLS, x)).join(" → ") || "-"}</span></div>`).join("")
-    : fh.length ? fh.slice(0, 2).map(([n]) => esc(n)).join(" · ") : "-";
-  return `<div class="sline"><span class="sk">영웅</span><span class="sv">${body}${meta}</span></div>`;
+    : `<span class="wait">리플레이 분석 중…</span>`;
+  return `<div class="sline"><span class="sk">영웅</span><span class="sv">${names}${meta}</span></div>`
+    + `<div class="sline"><span class="sk">스킬</span><span class="sv">${skills}</span></div>`;
 }
 
 function scoutHtml(pool, myRaceName, pending, mapName) {
