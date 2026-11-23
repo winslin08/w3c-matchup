@@ -492,6 +492,9 @@ function scoutHtml(pool, myRaceName, pending, mapName) {
   if (ex.length) { const a = avg(ex); out.push(line("멀티", `${mmss(a)}${a < 360000 ? ' <b class="warn">빠름</b>' : a > 720000 ? " 늦음" : ""} <small>${n}경기 중 ${ex.length}번</small>`)); }
   else out.push(line("멀티", "안 함"));
   if (army6.length) out.push(line("초반", `6분까지 병력 ${Math.round(avg(army6))}기`));
+  const oppApm = pool.map((x) => x.o.apm).filter(Boolean);
+  const myApm = pool.filter((x) => x.vsMe && x.me?.apm).map((x) => x.me.apm);
+  if (oppApm.length) out.push(line("APM", `상대 ${Math.round(avg(oppApm))}${myApm.length ? ` · 나 ${Math.round(avg(myApm))}` : ""}<div class="smeta">상대는 분석한 ${oppApm.length}경기 평균${myApm.length ? `, 나는 이 상대와 한 ${myApm.length}경기 평균` : ""}</div>`));
   const withRoute = pool.filter((x) => x.o.route?.stops.length);
   const pick = withRoute.find((x) => mapName && x.map === mapName) || withRoute[0];
   if (pick) {
