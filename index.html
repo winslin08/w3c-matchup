@@ -212,7 +212,7 @@ dialog input { background: var(--panel2); border: 1px solid var(--line); border-
     <input id="findInput" placeholder="상대 배틀태그 직접 조회 (예: Lukas#21464)" aria-label="상대 배틀태그">
     <button type="submit">조회</button>
   </form>
-  <div class="foot">게임에 들어가면 5초 안에 맨 위에 상대 전적이 뜹니다 · <a href="search.html">전체 검색</a> · 데이터 w3champions.com<br>버전 <span id="appVer"></span></div>
+  <div class="foot">게임에 들어가면 10초 안에 맨 위에 상대 전적이 뜹니다 · <a href="search.html">전체 검색</a> · 데이터 w3champions.com<br>버전 <span id="appVer"></span></div>
   <button type="button" class="update" id="updateBar" hidden>새 버전이 있어요 · 눌러서 업데이트</button>
 </div>
 
@@ -227,7 +227,7 @@ dialog input { background: var(--panel2); border: 1px solid var(--line); border-
 <script>
 const API = "https://website-backend.w3champions.com/api";
 const GW = 20;
-const POLL_MS = 5000;
+const POLL_MS = 8000;
 const RACES = { 0: ["랜덤", "--rnd", "R"], 1: ["휴먼", "--hu", "H"], 2: ["오크", "--oc", "O"], 4: ["나엘", "--ne", "N"], 8: ["언데드", "--ud", "U"], 16: ["랜덤", "--rnd", "R"] };
 const LEAGUES = ["그마", "마스터", "어뎁트", "다이아", "플래", "골드", "실버", "브론즈", "그래스"];
 const HEROES = {
@@ -306,8 +306,30 @@ function refreshMemoMarks() {
 
 const state = { me: store("w3c_me") || "winslin#3872", liveId: null, idleShown: false, seasons: null, current: null, mySeasons: [] };
 
+/* W3Champions answers 429 when one network sends too many requests. Remember the block,
+   pause every request until it lifts, and retry after the time the server asks for. */
+const rate = { until: 0 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function retryAfterMs(res) {
+  const v = res.headers.get("Retry-After");
+  const n = Number(v);
+  if (v && Number.isFinite(n) && n > 0) return Math.min(n, 120) * 1000;
+  const d = Date.parse(v || "");
+  return Number.isFinite(d) ? Math.min(Math.max(d - Date.now(), 1000), 120000) : 20000;
+}
+async function apiFetch(url, { tries = 2, onWait } = {}) {
+  for (let i = 0; ; i++) {
+    const wait = rate.until - Date.now();
+    if (wait > 0) { onWait?.(Math.ceil(wait / 1000)); await sleep(wait); }
+    const res = await fetch(url, { cache: "no-store" });
+    if (res.status !== 429) return res;
+    rate.until = Date.now() + retryAfterMs(res);
+    if (i >= tries - 1) return res;
+  }
+}
+
 async function get(path) {
-  const res = await fetch(API + path, { cache: "no-store" });
+  const res = await apiFetch(API + path);
   if (res.status === 404 || res.status === 204) return null;
   if (!res.ok) throw new Error("서버 응답 " + res.status);
   const t = await res.text();
@@ -432,6 +454,7 @@ async function renderOpponent(el, opp, info) {
     const pool = [];
     const diag = { games: 0, errors: [] };
     const onError = (msg) => diag.errors.push(msg);
+    const onStop = () => { diag.stopped = true; };
     const scout = el.querySelector(".scout-ana");
     const paint = (pending) => {
       if (!el.isConnected) return;
@@ -441,8 +464,9 @@ async function renderOpponent(el, opp, info) {
     (async () => {
       const h2hGames = h2h.slice(0, UNIT_GAMES);
       diag.games += h2hGames.length;
-      if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onError, onResult: (o, me, m) => { pool.push({ o, me, vsMe: true, map: m.mapName, at: m.startTime }); paint(true); } });
+      if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onError, onStop, onResult: (o, me, m) => { pool.push({ o, me, vsMe: true, map: m.mapName, at: m.startTime }); paint(true); } });
       if (!el.isConnected) return;
+      if (diag.stopped) { el.querySelector(".vsr").innerHTML = `<div class="empty">서버 제한으로 분석을 멈췄습니다. 1~2분 뒤 당겨서 새로고침하세요.</div>`; paint(false); return; }
       const vs = el.querySelector(".vsr");
       const games = await vsRaceGames(tag, myRace, seasons, new Set(h2h.map((m) => m.id))).catch(() => []);
       if (!el.isConnected) return;
@@ -451,7 +475,7 @@ async function renderOpponent(el, opp, info) {
         + (games.length ? `<div class="games">${games.map((m) => gameRow(m, tag, ["상대", "vs"], true)).join("")}</div>`
           : `<div class="empty">최근 두 시즌에 ${myRaceName} 상대 1v1 기록이 없습니다.</div>`);
       diag.games += games.length;
-      if (games.length) { paint(true); await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false, onError, onResult: (o, me, m) => { pool.push({ o, vsMe: false, map: m.mapName, at: m.startTime }); paint(true); } }); }
+      if (games.length) { paint(true); await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false, onError, onStop, onResult: (o, me, m) => { pool.push({ o, vsMe: false, map: m.mapName, at: m.startTime }); paint(true); } }); }
       paint(false);
     })();
   } catch (e) {
@@ -698,17 +722,24 @@ function saveAnalysis(key, val) {
   catch { dropAnalyses(false); try { localStorage.setItem(key, val); } catch {} }
 }
 
-async function analysisOf(matchId) {
+let lastReplayAt = 0;
+async function analysisOf(matchId, onWait) {
   const key = "w3c_a4_" + matchId;
   const hit = store(key); if (hit) try { return JSON.parse(hit); } catch {}
   let W3G;
   try { W3G = await loadParser(); } catch (e) { throw new Error("해석기를 불러오지 못함 (" + e.message + ")"); }
+  // space replay downloads out so a card does not fire 8 big requests at once
+  const gap = lastReplayAt + 1200 - Date.now();
+  if (gap > 0) await sleep(gap);
+  lastReplayAt = Date.now();
   let res = null;
   for (let i = 0; i < 2 && !res?.ok; i++) {
-    try { res = await fetch(`${API}/replays/${encodeURIComponent(matchId)}`); } catch { res = null; }
+    try { res = await apiFetch(`${API}/replays/${encodeURIComponent(matchId)}`, { tries: 4, onWait }); } catch { res = null; }
     if (res?.status === 404) throw new Error("W3Champions에 아직 리플레이가 없음");
-    if (!res?.ok && i === 0) await new Promise((r) => setTimeout(r, 1500));
+    if (res?.status === 429) break;
+    if (!res?.ok && i === 0) await sleep(1500);
   }
+  if (res?.status === 429) throw Object.assign(new Error("서버가 요청이 많다고 잠시 막음 (429) · 1~2분 뒤 당겨서 새로고침"), { rateLimited: true });
   if (!res?.ok) throw new Error(res ? `리플레이 받기 실패 (서버 ${res.status})` : "리플레이 받기 실패 (네트워크)");
   let r;
   try { r = await W3G.parseReplay(await res.arrayBuffer()); } catch (e) { throw new Error("리플레이 해석 실패 (" + (e?.message || e) + ")"); }
@@ -770,12 +801,14 @@ async function analyzeUnits(el, sec, tag, games, opt) {
   const total = {}; const list = [];
   const sum = sec.querySelector(".usum");
   if (sum) sum.innerHTML = `<div class="units"><span class="side">분석</span><span class="wait">리플레이 분석 중 0/${games.length}</span></div>`;
+  let stopped = false;
   for (const m of games) {
     if (!el.isConnected) return;
     const box = sec.querySelector(`.ana[data-mid="${CSS.escape(m.id)}"]`);
+    if (stopped) { if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">서버 제한으로 중단</span></div>`; continue; }
     if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">분석 중…</span></div>`;
     try {
-      const a = await analysisOf(m.id);
+      const a = await analysisOf(m.id, (sec) => { if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">서버 제한 · ${sec}초 후 다시 시도</span></div>`; opt.onWait?.(sec); });
       const otherTag = opt.vsMe ? state.me : m.teams.flatMap((t) => t.players).find((p) => lower(p.battleTag) !== lower(tag))?.battleTag;
       const o = a[lower(tag)], me = a[lower(otherTag)];
       if (!o) throw new Error("리플레이에서 상대를 찾지 못함");
@@ -787,6 +820,7 @@ async function analyzeUnits(el, sec, tag, games, opt) {
     } catch (e) {
       if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">${esc(e.message)}</span></div>`;
       opt.onError?.(e.message);
+      if (e.rateLimited) { stopped = true; opt.onStop?.(); }
     }
   }
   if (!list.length && sum) sum.innerHTML = `<div class="empty">리플레이를 분석하지 못했습니다.</div>`;
@@ -882,6 +916,11 @@ function closeDetail() {
 let timer = null;
 async function poll() {
   clearTimeout(timer);
+  if (rate.until > Date.now()) {
+    setStatus("err", `서버 제한 · ${Math.ceil((rate.until - Date.now()) / 1000)}초 대기`);
+    if (!document.hidden) timer = setTimeout(poll, Math.min(rate.until - Date.now() + 500, POLL_MS));
+    return;
+  }
   try {
     const m = await get(`/matches/ongoing/${encodeURIComponent(state.me)}`);
     if (m && m.teams) {
@@ -903,7 +942,7 @@ async function poll() {
     }
   } catch (e) {
     setStatus("err", "연결 실패 · 재시도 중");
-    if (!state.liveId) { state.idleShown = false; liveIdle("W3Champions에 연결하지 못했습니다 · 5초마다 다시 시도"); }
+    if (!state.liveId) { state.idleShown = false; liveIdle(rate.until > Date.now() ? "W3Champions가 요청이 많다고 잠시 막았습니다 · 곧 다시 시도" : "W3Champions에 연결하지 못했습니다 · 잠시 후 다시 시도"); }
   }
   if (!document.hidden) timer = setTimeout(poll, POLL_MS);
 }
@@ -984,7 +1023,7 @@ async function refreshView() {
 
 /* ---------- boot ---------- */
 /* ---------- app version: home-screen apps keep old files, so offer a reload when a newer one is published ---------- */
-const APP_VERSION = "2026.11.27-1";
+const APP_VERSION = "2026.11.28-1";
 async function checkUpdate() {
   try {
     const res = await fetch("version.txt?t=" + Date.now(), { cache: "no-store" });
