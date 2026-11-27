@@ -462,11 +462,9 @@ async function renderOpponent(el, opp, info) {
       el.querySelector(".hero-line").innerHTML = heroLineHtml(fh, rec.length, pool);
     };
     (async () => {
-      const h2hGames = h2h.slice(0, UNIT_GAMES);
-      diag.games += h2hGames.length;
-      if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onError, onStop, onResult: (o, me, m) => { pool.push({ o, me, vsMe: true, map: m.mapName, at: m.startTime }); paint(true); } });
-      if (!el.isConnected) return;
-      if (diag.stopped) { el.querySelector(".vsr").innerHTML = `<div class="empty">서버 제한으로 분석을 멈췄습니다. 1~2분 뒤 당겨서 새로고침하세요.</div>`; paint(false); return; }
+      // Replays are the slow, rate-limited part: the summary only needs the newest few games,
+      // everything else is analysed when "자세히 보기" is opened.
+      const h2hItems = h2h.slice(0, UNIT_GAMES).map((m) => ({ m, vsMe: true, sec: el.querySelector(".h2hs") }));
       const vs = el.querySelector(".vsr");
       const games = await vsRaceGames(tag, myRace, seasons, new Set(h2h.map((m) => m.id))).catch(() => []);
       if (!el.isConnected) return;
@@ -474,9 +472,22 @@ async function renderOpponent(el, opp, info) {
       vs.innerHTML = `<div class="sec-h"><span class="label">상대 vs ${myRaceName} 최근 ${games.length}경기</span>${games.length ? `<span class="h2h-sum"><span class="w">${w}승</span> <span class="l">${games.length - w}패</span></span>` : ""}</div>`
         + (games.length ? `<div class="games">${games.map((m) => gameRow(m, tag, ["상대", "vs"], true)).join("")}</div>`
           : `<div class="empty">최근 두 시즌에 ${myRaceName} 상대 1v1 기록이 없습니다.</div>`);
-      diag.games += games.length;
-      if (games.length) { paint(true); await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false, onError, onStop, onResult: (o, me, m) => { pool.push({ o, vsMe: false, map: m.mapName, at: m.startTime }); paint(true); } }); }
+      const vsItems = games.map((m) => ({ m, vsMe: false, sec: vs }));
+      const all = [...h2hItems, ...vsItems].sort((x, y) => new Date(y.m.startTime) - new Date(x.m.startTime));
+      const first = all.slice(0, SUMMARY_GAMES), rest = all.slice(SUMMARY_GAMES);
+      diag.games = first.length;
+      const opt = { onError, onStop, onResult: (o, me, m, vsMe) => { pool.push({ o, me: vsMe ? me : null, vsMe, map: m.mapName, at: m.startTime }); paint(true); } };
+      for (const it of rest) { const box = it.sec.querySelector(`.ana[data-mid="${CSS.escape(it.m.id)}"]`); if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">자세히 보기를 열면 분석</span></div>`; }
+      let restStarted = false;
+      const runRest = async () => {
+        if (restStarted || !rest.length || diag.stopped) return;
+        restStarted = true;
+        await analyzeGames(el, tag, rest, { onError: () => {}, onStop });
+      };
+      el.querySelector("details.all").addEventListener("toggle", (e) => { if (e.target.open) runRest(); });
+      if (first.length) { paint(true); await analyzeGames(el, tag, first, opt); }
       paint(false);
+      if (el.querySelector("details.all").open) runRest();
     })();
   } catch (e) {
     el.insertAdjacentHTML("beforeend", `<div class="sec empty">상대 정보를 불러오지 못했습니다 (${esc(e.message)}).</div>`);
@@ -537,7 +548,7 @@ function scoutHtml(pool, myRaceName, pending, mapName, diag = { games: 0, errors
     if (SHOW_ROUTE) out.push(line("동선", `${routeText(pick.o.route, pick.vsMe ? "내 진영" : "상대편 진영")}<div class="smeta">${esc(pick.map || "")} · 시작 ${pick.o.route.start}${same ? " · <b class=\"good\">같은 맵</b>" : ""}</div>`));
   }
   const vsMe = pool.filter((x) => x.vsMe).length;
-  out.push(`<div class="sfoot">리플레이 ${n}경기 기준 (나와 ${vsMe} · 다른 ${myRaceName} ${n - vsMe})${pending ? " · 분석 중…" : ""}</div>`);
+  out.push(`<div class="sfoot">최근 리플레이 ${n}경기 기준 (나와 ${vsMe} · 다른 ${myRaceName} ${n - vsMe})${pending ? " · 분석 중…" : ""}</div>`);
   return out.join("");
 }
 
@@ -564,6 +575,7 @@ async function vsRaceGames(tag, myRace, seasons, exclude) {
 
 /* ---------- replay analysis ---------- */
 const UNIT_GAMES = 5;
+const SUMMARY_GAMES = 3; // replays fetched up front for the summary
 const BUILD_WINDOW = 6 * 60000;
 const BUILDINGS = {
   htow: "타운홀", hkee: "킵", hcas: "캐슬", hhou: "농장", halt: "제단", hbar: "배럭", hbla: "대장간", hlum: "제재소",
@@ -729,7 +741,7 @@ async function analysisOf(matchId, onWait) {
   let W3G;
   try { W3G = await loadParser(); } catch (e) { throw new Error("해석기를 불러오지 못함 (" + e.message + ")"); }
   // space replay downloads out so a card does not fire 8 big requests at once
-  const gap = lastReplayAt + 1200 - Date.now();
+  const gap = lastReplayAt + 600 - Date.now();
   if (gap > 0) await sleep(gap);
   lastReplayAt = Date.now();
   let res = null;
@@ -797,33 +809,26 @@ function summaryHtml(list, total, games, opt = { other: "나", vsMe: true }) {
     <div class="empty" style="font-size:.72rem">${opt.vsMe ? "나와 한" : "다른 유저와 한"} 최근 ${n}경기 리플레이 기준${n < games ? ` · 분석 중 ${n}/${games}` : ""} · 스킬은 직전 경기 첫 영웅, 템은 6분 전 구매 횟수</div>`;
 }
 
-async function analyzeUnits(el, sec, tag, games, opt) {
-  const total = {}; const list = [];
-  const sum = sec.querySelector(".usum");
-  if (sum) sum.innerHTML = `<div class="units"><span class="side">분석</span><span class="wait">리플레이 분석 중 0/${games.length}</span></div>`;
+async function analyzeGames(el, tag, items, opt) {
   let stopped = false;
-  for (const m of games) {
+  for (const { m, vsMe, sec } of items) {
     if (!el.isConnected) return;
     const box = sec.querySelector(`.ana[data-mid="${CSS.escape(m.id)}"]`);
     if (stopped) { if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">서버 제한으로 중단</span></div>`; continue; }
     if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">분석 중…</span></div>`;
     try {
-      const a = await analysisOf(m.id, (sec) => { if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">서버 제한 · ${sec}초 후 다시 시도</span></div>`; opt.onWait?.(sec); });
-      const otherTag = opt.vsMe ? state.me : m.teams.flatMap((t) => t.players).find((p) => lower(p.battleTag) !== lower(tag))?.battleTag;
+      const a = await analysisOf(m.id, (sec) => { if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">서버 제한 · ${sec}초 후 다시 시도</span></div>`; });
+      const otherTag = vsMe ? state.me : m.teams.flatMap((t) => t.players).find((p) => lower(p.battleTag) !== lower(tag))?.battleTag;
       const o = a[lower(tag)], me = a[lower(otherTag)];
       if (!o) throw new Error("리플레이에서 상대를 찾지 못함");
-      if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="heroes">${unitList(o.units)}</span></div>${detailHtml(o, me, opt.other)}`;
-      for (const [k, n] of Object.entries(o.units || {})) if (!WORKERS.has(k)) total[k] = (total[k] || 0) + n;
-      list.push({ o, me });
-      opt.onResult?.(o, me, m);
-      if (sum) sum.innerHTML = summaryHtml(list, total, games.length, opt);
+      if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="heroes">${unitList(o.units)}</span></div>${detailHtml(o, me, vsMe ? "나" : "상대편")}`;
+      opt.onResult?.(o, me, m, vsMe);
     } catch (e) {
       if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">${esc(e.message)}</span></div>`;
       opt.onError?.(e.message);
       if (e.rateLimited) { stopped = true; opt.onStop?.(); }
     }
   }
-  if (!list.length && sum) sum.innerHTML = `<div class="empty">리플레이를 분석하지 못했습니다.</div>`;
 }
 
 /* ---------- match rendering ---------- */
@@ -1023,7 +1028,7 @@ async function refreshView() {
 
 /* ---------- boot ---------- */
 /* ---------- app version: home-screen apps keep old files, so offer a reload when a newer one is published ---------- */
-const APP_VERSION = "2026.11.28-2";
+const APP_VERSION = "2026.11.28-3";
 async function checkUpdate() {
   try {
     const res = await fetch("version.txt?t=" + Date.now(), { cache: "no-store" });
