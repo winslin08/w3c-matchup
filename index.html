@@ -428,15 +428,18 @@ async function renderOpponent(el, opp, info) {
 
     mountMemo(el.querySelector(".memo-slot"), tag);
     const pool = [];
+    const diag = { games: 0, errors: [] };
+    const onError = (msg) => diag.errors.push(msg);
     const scout = el.querySelector(".scout-ana");
     const paint = (pending) => {
       if (!el.isConnected) return;
-      scout.innerHTML = scoutHtml(pool, myRaceName, pending, info.map);
+      scout.innerHTML = scoutHtml(pool, myRaceName, pending, info.map, diag);
       el.querySelector(".hero-line").innerHTML = heroLineHtml(fh, rec.length, pool);
     };
     (async () => {
       const h2hGames = h2h.slice(0, UNIT_GAMES);
-      if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onResult: (o, me, m) => { pool.push({ o, me, vsMe: true, map: m.mapName, at: m.startTime }); paint(true); } });
+      diag.games += h2hGames.length;
+      if (h2hGames.length) await analyzeUnits(el, el.querySelector(".h2hs"), tag, h2hGames, { other: "나", vsMe: true, onError, onResult: (o, me, m) => { pool.push({ o, me, vsMe: true, map: m.mapName, at: m.startTime }); paint(true); } });
       if (!el.isConnected) return;
       const vs = el.querySelector(".vsr");
       const games = await vsRaceGames(tag, myRace, seasons, new Set(h2h.map((m) => m.id))).catch(() => []);
@@ -445,7 +448,8 @@ async function renderOpponent(el, opp, info) {
       vs.innerHTML = `<div class="sec-h"><span class="label">상대 vs ${myRaceName} 최근 ${games.length}경기</span>${games.length ? `<span class="h2h-sum"><span class="w">${w}승</span> <span class="l">${games.length - w}패</span></span>` : ""}</div>`
         + (games.length ? `<div class="games">${games.map((m) => gameRow(m, tag, ["상대", "vs"], true)).join("")}</div>`
           : `<div class="empty">최근 두 시즌에 ${myRaceName} 상대 1v1 기록이 없습니다.</div>`);
-      if (games.length) { paint(true); await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false, onResult: (o, me, m) => { pool.push({ o, vsMe: false, map: m.mapName, at: m.startTime }); paint(true); } }); }
+      diag.games += games.length;
+      if (games.length) { paint(true); await analyzeUnits(el, vs, tag, games, { other: "상대편", vsMe: false, onError, onResult: (o, me, m) => { pool.push({ o, vsMe: false, map: m.mapName, at: m.startTime }); paint(true); } }); }
       paint(false);
     })();
   } catch (e) {
@@ -467,9 +471,14 @@ function heroLineHtml(fh, recCount, pool) {
   return `<div class="sline"><span class="sk">영웅</span><span class="sv">${body}${meta}</span></div>`;
 }
 
-function scoutHtml(pool, myRaceName, pending, mapName) {
+function scoutHtml(pool, myRaceName, pending, mapName, diag = { games: 0, errors: [] }) {
   const line = (k, v, cls = "") => `<div class="sline ${cls}"><span class="sk">${k}</span><span class="sv">${v}</span></div>`;
-  if (!pool.length) return pending ? line("", `<span class="wait">리플레이 분석 중…</span>`) : line("", `<span class="wait">분석할 리플레이가 없습니다</span>`);
+  if (!pool.length) {
+    if (pending) return line("", `<span class="wait">리플레이 분석 중…</span>`);
+    if (!diag.games) return line("", `<span class="wait">분석할 경기가 없습니다 (나와 붙은 적도, 최근 ${myRaceName}전도 없음)</span>`);
+    const first = diag.errors[0] || "알 수 없는 오류";
+    return line("오류", `<span class="wait">리플레이 ${diag.games}경기 분석 실패 · ${esc(first)}</span><div class="smeta">화면을 당겨서 새로고침해 보세요</div>`, "alert");
+  }
   const n = pool.length;
   const total = {};
   for (const { o } of pool) for (const [k, c] of Object.entries(o.units || {})) if (!WORKERS.has(k)) total[k] = (total[k] || 0) + c;
@@ -604,8 +613,8 @@ const firstAt = (list, set) => { const hit = (list || []).find(([id]) => set.has
 let parserPromise = null;
 function loadParser() {
   if (!parserPromise) parserPromise = new Promise((ok, fail) => {
-    const s = document.createElement("script"); s.src = "w3g.js";
-    s.onload = () => (window.W3G ? ok(window.W3G) : fail(new Error("parser missing")));
+    const s = document.createElement("script"); s.src = "w3g.js?v=3";
+    s.onload = () => { if (window.W3G) ok(window.W3G); else { parserPromise = null; s.remove(); fail(new Error("parser missing")); } };
     s.onerror = () => { parserPromise = null; fail(new Error("w3g.js를 불러오지 못했습니다")); };
     document.head.appendChild(s);
   });
@@ -674,20 +683,40 @@ function digest(p, route) {
   };
 }
 
+// Old cache versions and a full storage must never stop analysis: drop cached analyses and try again.
+const ANALYSIS_PREFIXES = ["w3c_u2_", "w3c_a1_", "w3c_a2_", "w3c_a3_", "w3c_a4_"];
+function dropAnalyses(keepCurrent) {
+  try {
+    for (const k of Object.keys(localStorage))
+      if (ANALYSIS_PREFIXES.some((p) => k.startsWith(p)) && !(keepCurrent && k.startsWith("w3c_a4_"))) localStorage.removeItem(k);
+  } catch {}
+}
+function saveAnalysis(key, val) {
+  try { localStorage.setItem(key, val); }
+  catch { dropAnalyses(false); try { localStorage.setItem(key, val); } catch {} }
+}
+
 async function analysisOf(matchId) {
   const key = "w3c_a4_" + matchId;
   const hit = store(key); if (hit) try { return JSON.parse(hit); } catch {}
-  const W3G = await loadParser();
-  const res = await fetch(`${API}/replays/${encodeURIComponent(matchId)}`);
-  if (!res.ok) throw new Error("리플레이 없음");
-  const r = await W3G.parseReplay(await res.arrayBuffer());
+  let W3G;
+  try { W3G = await loadParser(); } catch (e) { throw new Error("해석기를 불러오지 못함 (" + e.message + ")"); }
+  let res = null;
+  for (let i = 0; i < 2 && !res?.ok; i++) {
+    try { res = await fetch(`${API}/replays/${encodeURIComponent(matchId)}`); } catch { res = null; }
+    if (res?.status === 404) throw new Error("W3Champions에 아직 리플레이가 없음");
+    if (!res?.ok && i === 0) await new Promise((r) => setTimeout(r, 1500));
+  }
+  if (!res?.ok) throw new Error(res ? `리플레이 받기 실패 (서버 ${res.status})` : "리플레이 받기 실패 (네트워크)");
+  let r;
+  try { r = await W3G.parseReplay(await res.arrayBuffer()); } catch (e) { throw new Error("리플레이 해석 실패 (" + (e?.message || e) + ")"); }
   const out = {};
   const bases = r.players.map((p) => baseOf(p.points));
   r.players.forEach((p, i) => {
     const j = r.players.length === 2 ? 1 - i : -1;
     out[lower(p.name)] = digest(p, j >= 0 ? routeOf(p.points, bases[i], bases[j]) : null);
   });
-  store(key, JSON.stringify(out));
+  saveAnalysis(key, JSON.stringify(out));
   return out;
 }
 
@@ -755,6 +784,7 @@ async function analyzeUnits(el, sec, tag, games, opt) {
       if (sum) sum.innerHTML = summaryHtml(list, total, games.length, opt);
     } catch (e) {
       if (box) box.innerHTML = `<div class="units"><span class="side">유닛</span><span class="wait">${esc(e.message)}</span></div>`;
+      opt.onError?.(e.message);
     }
   }
   if (!list.length && sum) sum.innerHTML = `<div class="empty">리플레이를 분석하지 못했습니다.</div>`;
@@ -952,6 +982,7 @@ async function refreshView() {
 
 /* ---------- boot ---------- */
 async function boot() {
+  dropAnalyses(true);
   state.liveId = null; state.idleShown = false;
   if (!$("#detail").hidden) closeDetail();
   liveIdle("연결 중…");
