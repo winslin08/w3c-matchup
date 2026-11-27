@@ -212,7 +212,7 @@ dialog input { background: var(--panel2); border: 1px solid var(--line); border-
     <input id="findInput" placeholder="상대 배틀태그 직접 조회 (예: Lukas#21464)" aria-label="상대 배틀태그">
     <button type="submit">조회</button>
   </form>
-  <div class="foot">게임에 들어가면 10초 안에 맨 위에 상대 전적이 뜹니다 · <a href="search.html">전체 검색</a> · 데이터 w3champions.com<br>버전 <span id="appVer"></span></div>
+  <div class="foot">게임에 들어가면 10초마다 확인해서 맨 위에 상대 전적을 띄웁니다 · <a href="search.html">전체 검색</a> · 데이터 w3champions.com<br>버전 <span id="appVer"></span></div>
   <button type="button" class="update" id="updateBar" hidden>새 버전이 있어요 · 눌러서 업데이트</button>
 </div>
 
@@ -227,7 +227,7 @@ dialog input { background: var(--panel2); border: 1px solid var(--line); border-
 <script>
 const API = "https://website-backend.w3champions.com/api";
 const GW = 20;
-const POLL_MS = 8000;
+const POLL_MS = 10000;
 const RACES = { 0: ["랜덤", "--rnd", "R"], 1: ["휴먼", "--hu", "H"], 2: ["오크", "--oc", "O"], 4: ["나엘", "--ne", "N"], 8: ["언데드", "--ud", "U"], 16: ["랜덤", "--rnd", "R"] };
 const LEAGUES = ["그마", "마스터", "어뎁트", "다이아", "플래", "골드", "실버", "브론즈", "그래스"];
 const HEROES = {
@@ -1023,7 +1023,7 @@ async function refreshView() {
 
 /* ---------- boot ---------- */
 /* ---------- app version: home-screen apps keep old files, so offer a reload when a newer one is published ---------- */
-const APP_VERSION = "2026.11.28-1";
+const APP_VERSION = "2026.11.28-2";
 async function checkUpdate() {
   try {
     const res = await fetch("version.txt?t=" + Date.now(), { cache: "no-store" });
