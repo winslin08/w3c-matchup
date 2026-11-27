@@ -181,6 +181,7 @@ form.find input { flex: 1; min-width: 0; background: var(--panel); border: 1px s
 form.find button, .btn { background: var(--gold); color: #1a1205; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; }
 .foot { text-align: center; font-size: .74rem; color: var(--muted); }
 .foot a { color: inherit; }
+.update { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); transform: translateX(-50%); z-index: 30; background: var(--gold); color: #1a1205; border: 0; border-radius: 999px; padding: 12px 20px; font-weight: 900; font-size: .95rem; box-shadow: 0 8px 24px rgba(0,0,0,.45); white-space: nowrap; }
 
 dialog { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 18px; width: min(92vw, 380px); }
 dialog::backdrop { background: rgba(0,0,0,.6); }
@@ -211,7 +212,8 @@ dialog input { background: var(--panel2); border: 1px solid var(--line); border-
     <input id="findInput" placeholder="상대 배틀태그 직접 조회 (예: Lukas#21464)" aria-label="상대 배틀태그">
     <button type="submit">조회</button>
   </form>
-  <div class="foot">게임에 들어가면 5초 안에 맨 위에 상대 전적이 뜹니다 · <a href="search.html">전체 검색</a> · 데이터 w3champions.com</div>
+  <div class="foot">게임에 들어가면 5초 안에 맨 위에 상대 전적이 뜹니다 · <a href="search.html">전체 검색</a> · 데이터 w3champions.com<br>버전 <span id="appVer"></span></div>
+  <button type="button" class="update" id="updateBar" hidden>새 버전이 있어요 · 눌러서 업데이트</button>
 </div>
 
 <dialog id="meDlg">
@@ -981,6 +983,19 @@ async function refreshView() {
 })();
 
 /* ---------- boot ---------- */
+/* ---------- app version: home-screen apps keep old files, so offer a reload when a newer one is published ---------- */
+const APP_VERSION = "2026.11.27-1";
+async function checkUpdate() {
+  try {
+    const res = await fetch("version.txt?t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const latest = (await res.text()).trim();
+    if (latest && latest !== APP_VERSION) $("#updateBar").hidden = false;
+  } catch {}
+}
+$("#updateBar").onclick = () => location.replace(location.pathname + "?v=" + Date.now());
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
+
 async function boot() {
   dropAnalyses(true);
   state.liveId = null; state.idleShown = false;
@@ -997,6 +1012,8 @@ async function boot() {
 }
 fetch(API + "/ladder/active-modes").then((r) => r.json()).then((l) => { for (const m of l) if (!MODES[m.id]) MODES[m.id] = m.name; }).catch(() => {});
 renderMe();
+$("#appVer").textContent = APP_VERSION;
+checkUpdate();
 boot();
 </script>
 </body>
