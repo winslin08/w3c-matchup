@@ -123,7 +123,9 @@ details.all > summary::-webkit-details-marker { display: none; }
 details.all > summary::before { content: "▸ "; }
 details.all[open] > summary::before { content: "▾ "; }
 .slot { display: grid; gap: 10px; }
-.waitbar { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 12px 14px; color: var(--muted); font-size: .86rem; }
+.waitbar { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 12px 14px; color: var(--muted); font-size: .86rem; }
+.waitbar:active { background: var(--panel2); }
+.waitbar.busy .dot { background: var(--gold); }
 .waitbar .dot { background: var(--win); }
 .hist { display: grid; gap: 6px; }
 .hrow { display: grid; gap: 6px; text-align: left; width: 100%; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 12px; padding: 10px 12px; }
@@ -212,7 +214,7 @@ dialog input { background: var(--panel2); border: 1px solid var(--line); border-
     <input id="findInput" placeholder="상대 배틀태그 직접 조회 (예: Lukas#21464)" aria-label="상대 배틀태그">
     <button type="submit">조회</button>
   </form>
-  <div class="foot">게임에 들어가면 10초마다 확인해서 맨 위에 상대 전적을 띄웁니다 · <a href="search.html">전체 검색</a> · 데이터 w3champions.com<br>버전 <span id="appVer"></span></div>
+  <div class="foot">매칭되면 앱을 열거나 화면을 당기면 맨 위에 상대 전적이 뜹니다 · <a href="search.html">전체 검색</a> · 데이터 w3champions.com<br>버전 <span id="appVer"></span></div>
   <button type="button" class="update" id="updateBar" hidden>새 버전이 있어요 · 눌러서 업데이트</button>
 </div>
 
@@ -227,7 +229,6 @@ dialog input { background: var(--panel2); border: 1px solid var(--line); border-
 <script>
 const API = "https://website-backend.w3champions.com/api";
 const GW = 20;
-const POLL_MS = 10000;
 const RACES = { 0: ["랜덤", "--rnd", "R"], 1: ["휴먼", "--hu", "H"], 2: ["오크", "--oc", "O"], 4: ["나엘", "--ne", "N"], 8: ["언데드", "--ud", "U"], 16: ["랜덤", "--rnd", "R"] };
 const LEAGUES = ["그마", "마스터", "어뎁트", "다이아", "플래", "골드", "실버", "브론즈", "그래스"];
 const HEROES = {
@@ -850,8 +851,8 @@ function renderMatch(box, match, live, label) {
 }
 
 /* ---------- top slot: the opponent of the match I'm in right now ---------- */
-function liveIdle(text) {
-  $("#live").innerHTML = `<div class="waitbar"><span class="dot"></span><span>${text}</span></div>`;
+function liveIdle(text, busy = false) {
+  $("#live").innerHTML = `<button type="button" class="waitbar${busy ? " busy" : ""}"><span class="dot"></span><span>${text}</span></button>`;
 }
 
 /* ---------- my match history ---------- */
@@ -918,18 +919,27 @@ function closeDetail() {
 }
 
 /* ---------- polling ---------- */
-let timer = null;
-async function poll() {
-  clearTimeout(timer);
+// Live check runs only when asked: app opened or brought back, pull-to-refresh, or a tap on the bar.
+// No background timer, so an open app sends nothing to W3Champions on its own.
+let checking = null;
+const hhmm = (d) => `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+function poll() {
+  if (!checking) checking = checkLive().finally(() => { checking = null; });
+  return checking;
+}
+async function checkLive() {
   if (rate.until > Date.now()) {
-    setStatus("err", `서버 제한 · ${Math.ceil((rate.until - Date.now()) / 1000)}초 대기`);
-    if (!document.hidden) timer = setTimeout(poll, Math.min(rate.until - Date.now() + 500, POLL_MS));
+    const sec = Math.ceil((rate.until - Date.now()) / 1000);
+    setStatus("err", `서버 제한 · ${sec}초 뒤 확인 가능`);
+    if (!state.liveId) liveIdle(`W3Champions가 요청이 많다고 잠시 막았습니다 · ${sec}초 뒤 다시 눌러주세요`);
     return;
   }
+  if (!state.liveId) liveIdle("게임 확인 중…", true);
   try {
     const m = await get(`/matches/ongoing/${encodeURIComponent(state.me)}`);
+    const at = hhmm(new Date());
     if (m && m.teams) {
-      setStatus("live", "경기 중");
+      setStatus("live", `경기 중 · ${at} 확인`);
       if (m.id !== state.liveId) {
         state.liveId = m.id;
         if (navigator.vibrate) navigator.vibrate(200);
@@ -937,21 +947,19 @@ async function poll() {
         window.scrollTo({ top: 0 });
       }
     } else {
-      setStatus("idle", "대기 중 · 자동 확인");
-      if (state.liveId || !state.idleShown) {
-        const ended = !!state.liveId;
-        state.liveId = null; state.idleShown = true;
-        liveIdle("대기 중 · 게임에 들어가면 여기에 상대가 뜹니다");
-        if (ended) loadHistory(true);
-      }
+      setStatus("idle", `대기 중 · ${at} 확인`);
+      const ended = !!state.liveId;
+      state.liveId = null; state.idleShown = true;
+      liveIdle(`게임 중 아님 (${at} 확인) · 매칭되면 여기를 누르거나 화면을 당기세요`);
+      if (ended) loadHistory(true);
     }
   } catch (e) {
-    setStatus("err", "연결 실패 · 재시도 중");
-    if (!state.liveId) { state.idleShown = false; liveIdle(rate.until > Date.now() ? "W3Champions가 요청이 많다고 잠시 막았습니다 · 곧 다시 시도" : "W3Champions에 연결하지 못했습니다 · 잠시 후 다시 시도"); }
+    setStatus("err", "연결 실패");
+    if (!state.liveId) { state.idleShown = false; liveIdle(rate.until > Date.now() ? "W3Champions가 요청이 많다고 잠시 막았습니다 · 잠시 뒤 다시 눌러주세요" : "W3Champions에 연결하지 못했습니다 · 눌러서 다시 확인"); }
   }
-  if (!document.hidden) timer = setTimeout(poll, POLL_MS);
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { poll(); reWake(); } else clearTimeout(timer); });
+$("#live").addEventListener("click", (e) => { if (e.target.closest(".waitbar")) poll(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { poll(); reWake(); } });
 
 /* ---------- my tag ---------- */
 function renderMe() { $("#meBtn").textContent = state.me; }
@@ -1028,7 +1036,7 @@ async function refreshView() {
 
 /* ---------- boot ---------- */
 /* ---------- app version: home-screen apps keep old files, so offer a reload when a newer one is published ---------- */
-const APP_VERSION = "2026.11.28-3";
+const APP_VERSION = "2026.11.28-4";
 async function checkUpdate() {
   try {
     const res = await fetch("version.txt?t=" + Date.now(), { cache: "no-store" });
